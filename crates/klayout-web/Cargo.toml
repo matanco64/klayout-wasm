@@ -1,0 +1,15 @@
+[package]
+name = "klayout-web"
+description = "The klayout-wasm browser module: one KLayout view behind a small C ABI for JavaScript"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[[bin]]
+name = "klayout_web"
+path = "src/main.rs"
+
+[dependencies]
+klayout-sys = { path = "../klayout-sys" }

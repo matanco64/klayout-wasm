@@ -13,7 +13,7 @@ the few edits Emscripten needs are applied to copies at build time.
 | Phase | Scope | State |
 |---|---|---|
 | 0 | `tl`, `gsi`, `db`, GDS2 + OASIS readers/writers; read a layout from Rust | **done** |
-| 1 | `laybasic` + `layview` + `edt` + `ant`: render, mouse input, all edit modes | **headless done**; browser canvas next |
+| 1 | `laybasic` + `layview` + `edt` + `ant`: render, mouse input, all edit modes | **done**: headless (Node) and in Chrome |
 | 2 | Rust API: shapes, cells, transactions, undo, export, layer properties | planned |
 | 3 | npm package, VS Code webview example, CI, release | planned |
 
@@ -40,10 +40,21 @@ shapes after redo: 145
 The view runs in synchronous mode, so there is no redraw thread and no need
 for SharedArrayBuffer or cross-origin isolation.
 
+Phase 1 in the browser (`web/`), checked by hand in Chrome at 1920x829: the
+layout renders with KLayout's stipples and labels; box mode shows KLayout's
+rubber band while dragging and commits the box (144 -> 145 shapes); the wheel
+zooms about the cursor; undo/redo work; select mode highlights the box.
+
+Not yet: Delete/Copy/Paste. In KLayout these are main-window menu commands,
+not canvas keys, so the Delete key does nothing; Phase 2 exposes
+`cut`/`copy`/`paste`/`select_all`/`cancel` as API calls.
+
 ## Layout
 
 ```
-crates/klayout-sys/   build.rs compiles KLayout; cpp/shim.cc is the C ABI; src/ binds it
+crates/klayout-sys/   build.rs compiles KLayout; cpp/ is the C ABI; src/ binds it safely
+crates/klayout-web/   the browser module: one view behind `klw_*` exports
+web/                  minimal demo page: canvas, input forwarding, mode buttons
 vendor/klayout/       KLayout v0.30.12 (submodule, unmodified)
 vendor/libexpat/      Expat R_2_9_0 (submodule) - KLayout's XML parser without Qt
 ```
@@ -59,6 +70,15 @@ source ~/emsdk/emsdk_env.sh
 export CC_wasm32_unknown_emscripten=emcc CXX_wasm32_unknown_emscripten=em++ AR_wasm32_unknown_emscripten=emar
 cargo build -p klayout-sys --example smoke --target wasm32-unknown-emscripten --release
 node target/wasm32-unknown-emscripten/release/examples/smoke.js
+```
+
+The browser demo:
+
+```sh
+cargo build -p klayout-web --target wasm32-unknown-emscripten --release
+cp target/wasm32-unknown-emscripten/release/klayout_web.{js,wasm} web/
+cp vendor/klayout/samples/lvs/ringo.gds web/
+python3 -m http.server -d web 8765   # then open http://127.0.0.1:8765
 ```
 
 A clean build compiles ~330 KLayout translation units and takes about three
@@ -84,11 +104,13 @@ minutes on a 16-core machine.
 
 ## Known gaps
 
-- The smoke `.wasm` is 19.6 MB uncompressed. Nothing has been done about size
+- The browser `.wasm` is 27 MB uncompressed, 6.4 MB gzipped. Nothing has been done about size
   yet: `-Oz`, `wasm-opt`, and dropping the scripting declarations (`gsiDecl*`)
   are the obvious first steps.
 - Expat's entropy comes from `getentropy`; untested under every embedding.
-- Only reading is exercised so far.
+- Frames are rendered at CSS pixels; no devicePixelRatio handling yet.
+- The demo page runs KLayout on the main thread; a Web Worker comes with the
+  npm package.
 
 ## License
 
