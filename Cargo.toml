@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/klayout-sys"]
+members = ["crates/klayout-sys", "crates/klayout-web"]
 
 [workspace.package]
 version = "0.1.0"

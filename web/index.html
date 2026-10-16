@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>klayout-wasm demo</title>
+  <style>
+    :root { color-scheme: light dark; --bg: #f4f4f5; --fg: #18181b; --muted: #71717a; --line: #d4d4d8; }
+    @media (prefers-color-scheme: dark) { :root { --bg: #18181b; --fg: #f4f4f5; --muted: #a1a1aa; --line: #3f3f46; } }
+    html, body { height: 100%; margin: 0; background: var(--bg); color: var(--fg); font: 13px system-ui, sans-serif; }
+    body { display: grid; grid-template-rows: auto 1fr auto; }
+    header, footer { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+    footer { border-top: 1px solid var(--line); border-bottom: 0; color: var(--muted); }
+    button, input, label { font: inherit; }
+    button[aria-pressed="true"] { font-weight: 600; outline: 2px solid currentColor; }
+    #stage { position: relative; min-height: 0; }
+    canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; outline: none; cursor: crosshair; }
+  </style>
+</head>
+<body>
+  <header>
+    <label>Layout <input id="file" type="file" accept=".gds,.gds2,.oas,.gds.gz"></label>
+    <span id="modes"></span>
+    <label>Layer <input id="layer" value="1/0" size="6"></label>
+    <button id="undo">Undo</button>
+    <button id="redo">Redo</button>
+    <button id="fit">Fit</button>
+  </header>
+  <div id="stage"><canvas id="canvas" tabindex="0"></canvas></div>
+  <footer id="status">Loading KLayout…</footer>
+  <script type="module" src="./main.js"></script>
+</body>
+</html>
