@@ -39,6 +39,13 @@ const MODULES: &[(&str, &str, &str)] = &[
     ("kl_db", "db/db/db.pro", "MAKE_DB_LIBRARY"),
     ("kl_gds2", "plugins/streamers/gds2/db_plugin/db_plugin.pro", "MAKE_DB_PLUGIN_LIBRARY"),
     ("kl_oasis", "plugins/streamers/oasis/db_plugin/db_plugin.pro", "MAKE_DB_PLUGIN_LIBRARY"),
+    // The Qt-free view, as the `klayout.lay` Python module builds it, minus
+    // lym (macros: pulls in the Python and Ruby interpreters) and img.
+    ("kl_rdb", "rdb/rdb/rdb.pro", "MAKE_RDB_LIBRARY"),
+    ("kl_laybasic", "laybasic/laybasic/laybasic.pro", "MAKE_LAYBASIC_LIBRARY"),
+    ("kl_layview", "layview/layview/layview.pro", "MAKE_LAYVIEW_LIBRARY"),
+    ("kl_edt", "edt/edt/edt.pro", "MAKE_EDT_LIBRARY"),
+    ("kl_ant", "ant/ant/ant.pro", "MAKE_ANT_LIBRARY"),
 ];
 
 /// Source edits KLayout needs to build for Emscripten: (file under `src/`,
@@ -93,6 +100,11 @@ fn main() {
         src.join("plugins/common"),
         src.join("plugins/streamers/gds2/db_plugin"),
         src.join("plugins/streamers/oasis/db_plugin"),
+        src.join("rdb/rdb"),
+        src.join("laybasic/laybasic"),
+        src.join("layview/layview"),
+        src.join("edt/edt"),
+        src.join("ant/ant"),
         expat.clone(),
     ];
 
@@ -114,7 +126,7 @@ fn main() {
     assert!(patches_left.is_empty(), "patches for files no module compiles: {patches_left:?}");
 
     let mut shim = cxx_build(&includes);
-    shim.file(manifest.join("cpp/shim.cc"));
+    shim.file(manifest.join("cpp/shim.cc")).file(manifest.join("cpp/view.cc")).include(manifest.join("cpp"));
     shim.compile("kl_shim");
     archives.push(out.join("libkl_shim.a"));
 
@@ -283,8 +295,13 @@ fn pro_sources(pro: &Path, config: &HashMap<&str, &str>) -> Vec<PathBuf> {
         }
 
         if let Some(cond) = line.strip_suffix('{') {
+            // Like qmake, don't evaluate conditions inside an inactive scope:
+            // Qt-only blocks use constructs (`greaterThan(QT_MAJOR_VERSION, 4)`)
+            // that mean nothing here.
             let outer = active(&frames);
-            frames.push((outer, eval_condition(cond.trim(), config).unwrap_or_else(|| unsupported(pro, line))));
+            let own = !outer
+                || eval_condition(cond.trim(), config).unwrap_or_else(|| unsupported(pro, line));
+            frames.push((outer, own));
             continue;
         }
 

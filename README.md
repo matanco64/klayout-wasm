@@ -13,7 +13,7 @@ the few edits Emscripten needs are applied to copies at build time.
 | Phase | Scope | State |
 |---|---|---|
 | 0 | `tl`, `gsi`, `db`, GDS2 + OASIS readers/writers; read a layout from Rust | **done** |
-| 1 | `laybasic` + `edt` + `ant`: render to a canvas, mouse input, all edit modes | next |
+| 1 | `laybasic` + `layview` + `edt` + `ant`: render, mouse input, all edit modes | **headless done**; browser canvas next |
 | 2 | Rust API: shapes, cells, transactions, undo, export, layer properties | planned |
 | 3 | npm package, VS Code webview example, CI, release | planned |
 
@@ -24,6 +24,21 @@ ringo.gds:         dbu 0.001,  9 cells (1 top), 12 layers, 144 shapes   (native:
 drcFullTest_1.oas: dbu 0.001, 24 cells (1 top),  2 layers,  23 shapes   (native: identical)
 garbage input rejected: Stream has unknown format: data
 ```
+
+Phase 1, headless under Node (`examples/view.rs`): KLayout's Qt-free view
+renders `ringo.gds` at 800x600, its own box tool draws a shape from synthetic
+clicks, and undo/redo remove and restore it.
+
+```
+modes: ["select", "move", "ruler", "polygon", "box", "text", "path", "instance", "partial"]
+drawing on layer 1/0
+shapes: 144 before, 145 after drawing     -> native KLayout reads back: box (9515,2269;16288,5655) on 1/0
+shapes after undo: 144
+shapes after redo: 145
+```
+
+The view runs in synchronous mode, so there is no redraw thread and no need
+for SharedArrayBuffer or cross-origin isolation.
 
 ## Layout
 
