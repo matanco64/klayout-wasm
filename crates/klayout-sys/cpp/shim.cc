@@ -1,45 +1,27 @@
-// The C ABI between Rust and KLayout.
-//
-// Every entry point catches every exception: a C++ exception must never
-// unwind into Rust. Failures are reported as a status code, with the message
-// kept for kl_last_error().
+// The C ABI for KLayout's layout database. See guard.h for error handling.
+
+#include "guard.h"
 
 #include "dbLayout.h"
 #include "dbReader.h"
-#include "tlException.h"
 #include "tlStream.h"
 
 #include <cstddef>
 #include <cstdint>
-#include <exception>
-#include <string>
 
-namespace
+std::string &kl::error_slot ()
 {
-std::string last_error;
+  static std::string slot;
+  return slot;
+}
 
-template <class F>
-int guarded (F &&f)
-{
-  try {
-    f ();
-    return 0;
-  } catch (tl::Exception &ex) {
-    last_error = ex.msg ();
-  } catch (std::exception &ex) {
-    last_error = ex.what ();
-  } catch (...) {
-    last_error = "unknown C++ exception";
-  }
-  return -1;
-}
-}
+using kl::guarded;
 
 extern "C" {
 
 const char *kl_last_error ()
 {
-  return last_error.c_str ();
+  return kl::error_slot ().c_str ();
 }
 
 db::Layout *kl_layout_new ()
