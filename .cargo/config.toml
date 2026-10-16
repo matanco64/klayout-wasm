@@ -1,0 +1,15 @@
+# KLayout's C++ and Rust's std must agree on one exception model. Rust's
+# wasm32-unknown-emscripten target uses native WebAssembly exceptions in the
+# legacy encoding, so the C++ side is built the same way (see
+# crates/klayout-sys/build.rs). rustc links through emcc, which does not add
+# the C++ runtime on its own.
+[target.wasm32-unknown-emscripten]
+rustflags = [
+  "-C", "link-arg=-fwasm-exceptions",
+  "-C", "link-arg=-sWASM_LEGACY_EXCEPTIONS=1",
+  "-C", "link-arg=-lc++",
+  "-C", "link-arg=-lc++abi",
+  "-C", "link-arg=-sUSE_ZLIB=1",
+  "-C", "link-arg=-sALLOW_MEMORY_GROWTH=1",
+  "-C", "link-arg=-sSTACK_SIZE=4MB",
+]

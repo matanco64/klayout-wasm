@@ -1,0 +1,9 @@
+[submodule "vendor/klayout"]
+	path = vendor/klayout
+	url = https://github.com/KLayout/klayout.git
+	branch = master
+	shallow = true
+[submodule "vendor/libexpat"]
+	path = vendor/libexpat
+	url = https://github.com/libexpat/libexpat.git
+	shallow = true
