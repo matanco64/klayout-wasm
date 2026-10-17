@@ -14,7 +14,7 @@ the few edits Emscripten needs are applied to copies at build time.
 |---|---|---|
 | 0 | `tl`, `gsi`, `db`, GDS2 + OASIS readers/writers; read a layout from Rust | **done** |
 | 1 | `laybasic` + `layview` + `edt` + `ant`: render, mouse input, all edit modes | **done**: headless (Node) and in Chrome |
-| 2 | Rust API: shapes, cells, transactions, undo, export, layer properties | planned |
+| 2 | Rust API and browser protocol: shapes, cells, instances, transactions, edit commands, selection, export, layer panel, change events | **done**: headless (Node, Bun) and in Chrome |
 | 3 | npm package, VS Code webview example, CI, release | planned |
 
 Phase 0, run under Node, against native KLayout 0.30.12 on the same files:
@@ -45,16 +45,75 @@ layout renders with KLayout's stipples and labels; box mode shows KLayout's
 rubber band while dragging and commits the box (144 -> 145 shapes); the wheel
 zooms about the cursor; undo/redo work; select mode highlights the box.
 
-Not yet: Delete/Copy/Paste. In KLayout these are main-window menu commands,
-not canvas keys, so the Delete key does nothing; Phase 2 exposes
-`cut`/`copy`/`paste`/`select_all`/`cancel` as API calls.
+Phase 2, headless (`examples/api.rs`, every check an assertion):
+
+```
+dbu 0.001, 9 cells, 12 layers, top RINGO
+decoded 144 shapes over every cell and layer (view counts 144)
+all 4 shape kinds round-trip exactly
+history after edit: History { undo: Some("API test"), redo: None }
+failing edit rejected: no such shape in API_TEST on 200/0     (and nothing applied)
+erase, rename, undo x3, redo: ok
+Gds2: 10538 bytes, 10 cells, 148 shapes
+select all: 826 objects, 826 shapes
+copy + paste: 148 -> 974 shapes
+select all + delete: 148 -> 0 shapes
+.lyp: 6191 bytes, round-trips visibility
+```
+
+and through the browser module's protocol (`web/test.mjs`, run with Bun or
+Node): KLayout's box tool reports its edit as a `layout_changed` event with
+the undo label "Create box"; JSON edits, select all + delete, GDS2/OASIS
+export, the layer panel and `.lyp` round-trip. In Chrome: draw, select,
+Delete key, Cmd+Z, Cmd+C, Cmd+V (paste follows the mouse until a click).
+
+## The Rust API
+
+`klayout_sys::View` wraps KLayout's view; `klayout_sys::model` holds the
+data types (optionally `serde`, feature `serde`). Coordinates are integer
+database units.
+
+| Area | Calls |
+|---|---|
+| Input and rendering | `resize`, `mouse`, `wheel`, `key`, `frame`, `zoom_fit`, `switch_mode` |
+| Reading | `dbu`, `cells`, `layers`, `shapes(cell, layer)`, `instances(cell)` |
+| Writing | `edit(description, &[Edit])`: insert/erase shapes and instances, create/delete/rename cells, as one undo step, all or nothing |
+| Edit menu | `command(Command)`: delete, cut, copy, paste, paste-move, select all, unselect all, cancel |
+| Selection | `selection()`: shapes and instances, with their cell and layer |
+| History | `undo`, `redo`, `state().history` (KLayout's undo/redo labels) |
+| Files | `load`, `export(Format::Gds2 / Oasis)` to bytes |
+| Layer panel | `layer_panel`, `set_layer_visible`, `load_layer_properties`, `save_layer_properties` (.lyp) |
+| Changes | `state()`: compare two snapshots to see whether the layout, selection, layer panel or mode changed |
+
+Shapes and instances are identified by value: `Edit::EraseShape` removes
+one shape equal to the one given. KLayout normalizes polygons (hull
+clockwise, holes counterclockwise), so a polygon reads back in that form.
+
+## The browser protocol
+
+`crates/klayout-web` exposes one entry point, `klw_call(json, payload)`,
+returning a JSON response and optionally a binary payload; `web/klayout.js`
+is a small client. Requests and replies are typed in
+`crates/klayout-web/src/protocol.rs` (version 1; `hello` checks it). Every
+response carries `events`: `layout_changed` (with undo/redo labels),
+`selection_changed`, `layer_panel_changed`, `mode_changed`, whatever caused
+them, including KLayout's own tools reacting to mouse input.
+
+```js
+const k = await connect(createKlayout);              // hello
+k.call({ type: "open" }, gdsBytes);
+k.call({ type: "edit", description: "add pin", edits: [
+  { op: "insert_shape", cell: "TOP", layer: { layer: 1, datatype: 0 },
+    shape: { kind: "box", left: 0, bottom: 0, right: 100, top: 100 } } ] });
+const { payload } = k.call({ type: "export", format: "oasis" });
+```
 
 ## Layout
 
 ```
 crates/klayout-sys/   build.rs compiles KLayout; cpp/ is the C ABI; src/ binds it safely
-crates/klayout-web/   the browser module: one view behind `klw_*` exports
-web/                  minimal demo page: canvas, input forwarding, mode buttons
+crates/klayout-web/   the browser module: one view behind one JSON message entry point
+web/                  klayout.js (protocol client), test.mjs (protocol test), minimal demo page
 vendor/klayout/       KLayout v0.30.12 (submodule, unmodified)
 vendor/libexpat/      Expat R_2_9_0 (submodule) - KLayout's XML parser without Qt
 ```
@@ -68,8 +127,11 @@ Requirements: Rust (pinned in `rust-toolchain.toml`), Emscripten 6.0.12
 git submodule update --init --depth 1
 source ~/emsdk/emsdk_env.sh
 export CC_wasm32_unknown_emscripten=emcc CXX_wasm32_unknown_emscripten=em++ AR_wasm32_unknown_emscripten=emar
-cargo build -p klayout-sys --example smoke --target wasm32-unknown-emscripten --release
+cargo build -p klayout-sys --example smoke --example api --target wasm32-unknown-emscripten --release
 node target/wasm32-unknown-emscripten/release/examples/smoke.js
+node target/wasm32-unknown-emscripten/release/examples/api.js
+cargo build -p klayout-web --target wasm32-unknown-emscripten --release
+bun web/test.mjs        # or: node web/test.mjs
 ```
 
 The browser demo:
@@ -104,13 +166,20 @@ minutes on a 16-core machine.
 
 ## Known gaps
 
-- The browser `.wasm` is 27 MB uncompressed, 6.4 MB gzipped. Nothing has been done about size
+- The browser `.wasm` is 27 MB uncompressed, 6.5 MB gzipped. Nothing has been done about size
   yet: `-Oz`, `wasm-opt`, and dropping the scripting declarations (`gsiDecl*`)
   are the obvious first steps.
 - Expat's entropy comes from `getentropy`; untested under every embedding.
 - Frames are rendered at CSS pixels; no devicePixelRatio handling yet.
 - The demo page runs KLayout on the main thread; a Web Worker comes with the
-  npm package.
+  npm package. The protocol is already plain messages, so it can move as is.
+- Not carried through the API yet: user properties on shapes and instances
+  (GDS properties), and KLayout's PCells and libraries.
+- The `layout_changed` event comes from KLayout's undo journal, so a change
+  made outside an undo step would go unnoticed. Every path through this API
+  and KLayout's tools uses one.
+- serde cannot reject stray fields on requests that have none (`zoom_fit`,
+  `undo`, ...); requests with fields reject unknown ones.
 
 ## License
 

@@ -6,7 +6,7 @@
 //!     --release -- -C link-arg=-sNODERAWFS=1
 //!   node target/wasm32-unknown-emscripten/release/examples/view.js <out-dir>
 
-use klayout_sys::{Mouse, View, buttons};
+use klayout_sys::{Buttons, Mouse, View};
 use std::fs::File;
 use std::io::BufWriter;
 
@@ -23,9 +23,9 @@ fn save(view: &mut View, path: &str) {
 }
 
 fn click(view: &mut View, x: f64, y: f64) {
-    view.mouse(Mouse::Move, x, y, 0).unwrap();
-    view.mouse(Mouse::Press, x, y, buttons::LEFT).unwrap();
-    view.mouse(Mouse::Release, x, y, buttons::LEFT).unwrap();
+    view.mouse(Mouse::Move, x, y, Buttons::NONE).unwrap();
+    view.mouse(Mouse::Press, x, y, Buttons::LEFT).unwrap();
+    view.mouse(Mouse::Release, x, y, Buttons::LEFT).unwrap();
 }
 
 fn main() {
@@ -45,11 +45,11 @@ fn main() {
 
     view.switch_mode("box").unwrap();
     println!("mode: {}", view.mode_name());
-    view.mouse(Mouse::Enter, 0.0, 0.0, 0).unwrap();
+    view.mouse(Mouse::Enter, 0.0, 0.0, Buttons::NONE).unwrap();
     click(&mut view, 300.0, 250.0);
     for step in 1..=10 {
         let t = f64::from(step) / 10.0;
-        view.mouse(Mouse::Move, 300.0 + 200.0 * t, 250.0 + 100.0 * t, 0).unwrap();
+        view.mouse(Mouse::Move, 300.0 + 200.0 * t, 250.0 + 100.0 * t, Buttons::NONE).unwrap();
     }
     click(&mut view, 500.0, 350.0);
     let after = view.shape_count();
