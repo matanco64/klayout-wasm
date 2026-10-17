@@ -8,6 +8,12 @@ rust-version.workspace = true
 links = "klayout"
 build = "build.rs"
 
+[dependencies]
+serde = { version = "1", features = ["derive"], optional = true }
+
+[features]
+serde = ["dep:serde"]
+
 [build-dependencies]
 cc = { version = "1.2", features = ["parallel"] }
 

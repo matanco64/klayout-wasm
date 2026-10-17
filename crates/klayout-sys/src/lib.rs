@@ -1,6 +1,17 @@
-//! Raw bindings to the KLayout C++ shim in `cpp/shim.cc`, plus [`Layout`], a
-//! thin owning wrapper. KLayout itself is only linked for
+//! KLayout compiled to WebAssembly: raw bindings to the C++ shim in `cpp/`,
+//! and safe owning wrappers: [`Layout`], a bare layout database, and
+//! [`View`], KLayout's layout view with its editing tools. Structured data
+//! crosses the boundary in the encoding of `cpp/codec.h`; [`model`] holds
+//! the Rust types. KLayout itself is only linked for
 //! `wasm32-unknown-emscripten`.
+
+mod codec;
+pub mod model;
+
+pub use model::*;
+
+/// The KLayout release compiled in.
+pub const KLAYOUT_VERSION: &str = env!("KLAYOUT_VERSION");
 
 use std::ffi::CStr;
 use std::fmt;
@@ -111,27 +122,21 @@ unsafe extern "C" {
     pub fn kl_view_shape_count(view: *mut RawView) -> usize;
     pub fn kl_view_undo(view: *mut RawView) -> i32;
     pub fn kl_view_redo(view: *mut RawView) -> i32;
-}
-
-/// Mouse buttons and modifiers, as `lay::LeftButton` etc.
-pub mod buttons {
-    pub const SHIFT: u32 = 0x01;
-    pub const CONTROL: u32 = 0x02;
-    pub const ALT: u32 = 0x04;
-    pub const LEFT: u32 = 0x08;
-    pub const MIDDLE: u32 = 0x10;
-    pub const RIGHT: u32 = 0x20;
-}
-
-/// A pointer event, in canvas pixels.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Mouse {
-    Move = 0,
-    Press = 1,
-    Release = 2,
-    DoubleClick = 3,
-    Enter = 4,
-    Leave = 5,
+    pub fn kl_view_out(view: *mut RawView, len: *mut usize) -> *const u8;
+    pub fn kl_view_dbu(view: *mut RawView) -> f64;
+    pub fn kl_view_export(view: *mut RawView, format: i32) -> i32;
+    pub fn kl_view_cells(view: *mut RawView) -> i32;
+    pub fn kl_view_layers(view: *mut RawView) -> i32;
+    pub fn kl_view_shapes(view: *mut RawView, cell: *const c_char, layer: i32, datatype: i32) -> i32;
+    pub fn kl_view_instances(view: *mut RawView, cell: *const c_char) -> i32;
+    pub fn kl_view_edit(view: *mut RawView, description: *const c_char, data: *const u8, len: usize) -> i32;
+    pub fn kl_view_command(view: *mut RawView, command: i32) -> i32;
+    pub fn kl_view_selection(view: *mut RawView) -> i32;
+    pub fn kl_view_layer_panel(view: *mut RawView) -> i32;
+    pub fn kl_view_set_layer_visible(view: *mut RawView, id: u64, visible: i32) -> i32;
+    pub fn kl_view_load_layer_properties(view: *mut RawView, path: *const c_char) -> i32;
+    pub fn kl_view_save_layer_properties(view: *mut RawView, path: *const c_char) -> i32;
+    pub fn kl_view_state(view: *mut RawView) -> i32;
 }
 
 /// A rendered frame: tightly packed RGBA, row-major, top row first.
@@ -185,16 +190,18 @@ impl View {
         status(unsafe { kl_view_switch_mode(self.0.as_ptr(), name.as_ptr()) })
     }
 
-    pub fn mouse(&mut self, event: Mouse, x: f64, y: f64, buttons: u32) -> Result<(), Error> {
-        status(unsafe { kl_view_mouse(self.0.as_ptr(), event as i32, x, y, buttons) })
+    /// `buttons`: held buttons for moves, the changing button for press and release.
+    pub fn mouse(&mut self, event: Mouse, x: f64, y: f64, buttons: Buttons) -> Result<(), Error> {
+        status(unsafe { kl_view_mouse(self.0.as_ptr(), event as i32, x, y, buttons.bits()) })
     }
 
-    pub fn wheel(&mut self, delta: i32, horizontal: bool, x: f64, y: f64, buttons: u32) -> Result<(), Error> {
-        status(unsafe { kl_view_wheel(self.0.as_ptr(), delta, horizontal as i32, x, y, buttons) })
+    /// `delta` in Qt units: 120 per wheel notch, positive away from the user.
+    pub fn wheel(&mut self, delta: i32, horizontal: bool, x: f64, y: f64, buttons: Buttons) -> Result<(), Error> {
+        status(unsafe { kl_view_wheel(self.0.as_ptr(), delta, horizontal as i32, x, y, buttons.bits()) })
     }
 
-    pub fn key(&mut self, key: u32, buttons: u32) -> Result<(), Error> {
-        status(unsafe { kl_view_key(self.0.as_ptr(), key, buttons) })
+    pub fn key(&mut self, key: Key, buttons: Buttons) -> Result<(), Error> {
+        status(unsafe { kl_view_key(self.0.as_ptr(), key.qt_code(), buttons.bits()) })
     }
 
     /// Pumps the view and returns the current image.
@@ -235,6 +242,153 @@ impl View {
 
     pub fn redo(&mut self) -> Result<(), Error> {
         status(unsafe { kl_view_redo(self.0.as_ptr()) })
+    }
+
+    /// Runs a shim call that leaves encoded data behind, and decodes it.
+    fn query<T>(&mut self, code: i32, decode: impl FnOnce(&mut codec::Reader) -> Result<T, Error>) -> Result<T, Error> {
+        status(code)?;
+        let mut reader = codec::Reader::new(self.out());
+        let value = decode(&mut reader)?;
+        reader.finish()?;
+        Ok(value)
+    }
+
+    fn out(&mut self) -> &[u8] {
+        let mut len = 0;
+        let data = unsafe { kl_view_out(self.0.as_ptr(), &mut len) };
+        if len == 0 {
+            return &[];
+        }
+        // SAFETY: the shim keeps `len` bytes behind `data` until the next
+        // call on this view, which needs `&mut self`.
+        unsafe { std::slice::from_raw_parts(data, len) }
+    }
+
+    /// Database unit in micrometers.
+    pub fn dbu(&mut self) -> Result<f64, Error> {
+        let dbu = unsafe { kl_view_dbu(self.0.as_ptr()) };
+        if dbu > 0.0 { Ok(dbu) } else { Err(last_error()) }
+    }
+
+    /// The layout as a GDS2 or OASIS stream.
+    pub fn export(&mut self, format: Format) -> Result<Vec<u8>, Error> {
+        status(unsafe { kl_view_export(self.0.as_ptr(), format as i32) })?;
+        Ok(self.out().to_vec())
+    }
+
+    pub fn cells(&mut self) -> Result<Vec<Cell>, Error> {
+        let code = unsafe { kl_view_cells(self.0.as_ptr()) };
+        self.query(code, |r| {
+            r.list(|r| {
+                let (name, top, empty, bbox) = (r.str()?, r.bool()?, r.bool()?, r.rect()?);
+                Ok(Cell { name, top, bbox: (!empty).then_some(bbox) })
+            })
+        })
+    }
+
+    pub fn layers(&mut self) -> Result<Vec<Layer>, Error> {
+        let code = unsafe { kl_view_layers(self.0.as_ptr()) };
+        self.query(code, |r| {
+            r.list(|r| {
+                let (spec, name) = (r.layer()?, r.str()?);
+                Ok(Layer { spec, name: (!name.is_empty()).then_some(name) })
+            })
+        })
+    }
+
+    /// The shapes `cell` itself holds on `layer`, not those of its children.
+    pub fn shapes(&mut self, cell: &str, layer: LayerSpec) -> Result<Vec<Shape>, Error> {
+        let cell = c_string(cell)?;
+        let code = unsafe { kl_view_shapes(self.0.as_ptr(), cell.as_ptr(), layer.layer, layer.datatype) };
+        self.query(code, |r| r.list(codec::Reader::shape))
+    }
+
+    /// The child cells placed in `cell`.
+    pub fn instances(&mut self, cell: &str) -> Result<Vec<Instance>, Error> {
+        let cell = c_string(cell)?;
+        let code = unsafe { kl_view_instances(self.0.as_ptr(), cell.as_ptr()) };
+        self.query(code, |r| r.list(codec::Reader::instance))
+    }
+
+    /// Applies `edits` as one undo step named `description`: all of them,
+    /// or none if any fails.
+    pub fn edit(&mut self, description: &str, edits: &[Edit]) -> Result<(), Error> {
+        let mut data = codec::Writer::default();
+        for edit in edits {
+            data.edit(edit)?;
+        }
+        let description = c_string(description)?;
+        status(unsafe { kl_view_edit(self.0.as_ptr(), description.as_ptr(), data.0.as_ptr(), data.0.len()) })
+    }
+
+    pub fn command(&mut self, command: Command) -> Result<(), Error> {
+        status(unsafe { kl_view_command(self.0.as_ptr(), command as i32) })
+    }
+
+    pub fn selection(&mut self) -> Result<Vec<Selected>, Error> {
+        let code = unsafe { kl_view_selection(self.0.as_ptr()) };
+        self.query(code, |r| {
+            r.list(|r| match r.u8()? {
+                0 => Ok(Selected::Shape { cell: r.str()?, layer: r.layer()?, shape: r.shape()? }),
+                1 => Ok(Selected::Instance { cell: r.str()?, instance: r.instance()? }),
+                _ => Err(Error("malformed data from KLayout".into())),
+            })
+        })
+    }
+
+    /// The layer panel, depth first.
+    pub fn layer_panel(&mut self) -> Result<Vec<LayerEntry>, Error> {
+        let code = unsafe { kl_view_layer_panel(self.0.as_ptr()) };
+        self.query(code, |r| {
+            r.list(|r| {
+                let id = LayerEntryId(r.u64()?);
+                let (has_parent, parent) = (r.bool()?, LayerEntryId(r.u64()?));
+                let (group, label, source) = (r.bool()?, r.str()?, r.str()?);
+                let (has_layer, layer) = (r.bool()?, r.layer()?);
+                Ok(LayerEntry {
+                    id,
+                    parent: has_parent.then_some(parent),
+                    group,
+                    label,
+                    source,
+                    layer: has_layer.then_some(layer),
+                    visible: r.bool()?,
+                    fill: Rgb::from_argb(r.u32()?),
+                    frame: Rgb::from_argb(r.u32()?),
+                })
+            })
+        })
+    }
+
+    pub fn set_layer_visible(&mut self, id: LayerEntryId, visible: bool) -> Result<(), Error> {
+        status(unsafe { kl_view_set_layer_visible(self.0.as_ptr(), id.0, visible as i32) })
+    }
+
+    /// Replaces the layer panel with a `.lyp` file from the Emscripten filesystem.
+    pub fn load_layer_properties(&mut self, path: &str) -> Result<(), Error> {
+        let path = c_string(path)?;
+        status(unsafe { kl_view_load_layer_properties(self.0.as_ptr(), path.as_ptr()) })
+    }
+
+    pub fn save_layer_properties(&mut self, path: &str) -> Result<(), Error> {
+        let path = c_string(path)?;
+        status(unsafe { kl_view_save_layer_properties(self.0.as_ptr(), path.as_ptr()) })
+    }
+
+    pub fn state(&mut self) -> Result<ViewState, Error> {
+        let code = unsafe { kl_view_state(self.0.as_ptr()) };
+        self.query(code, |r| {
+            let revision = (r.u64()?, r.u64()?);
+            let (can_undo, undo) = (r.bool()?, r.str()?);
+            let (can_redo, redo) = (r.bool()?, r.str()?);
+            Ok(ViewState {
+                revision,
+                history: History { undo: can_undo.then_some(undo), redo: can_redo.then_some(redo) },
+                selection: r.u64()?,
+                layer_panel: r.u64()?,
+                mode: r.str()?,
+            })
+        })
     }
 }
 

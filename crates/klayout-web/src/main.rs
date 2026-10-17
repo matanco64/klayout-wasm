@@ -1,182 +1,229 @@
-//! The browser module: one KLayout view, driven from JavaScript through the
-//! `klw_*` functions below. JavaScript forwards canvas input and paints the
-//! frames; every decision about layout, modes and editing stays in KLayout.
+//! The browser module: one KLayout view behind one message-passing entry
+//! point. JavaScript sends a JSON [`Request`], optionally with a binary
+//! payload (a layout or a `.lyp` file), and reads back a JSON [`Response`]
+//! and, for some replies, a binary payload (a frame, an exported layout).
+//! The same messages can travel unchanged over `postMessage` to a worker.
 //!
-//! Errors are reported as a negative return value; `klw_error` returns the
-//! message as a NUL-terminated string.
+//! ```text
+//! klw_call(json, json_len, payload, payload_len) -> response JSON (UTF-8, klw_response_len bytes)
+//! klw_payload() / klw_payload_len()              -> the reply's payload, if the reply says so
+//! ```
+//!
+//! Both returned buffers stay valid until the next `klw_call`.
 
-use klayout_sys::{Mouse, View};
+mod protocol;
+
+use klayout_sys::{Error, View, ViewState};
+use protocol::{Event, PROTOCOL, Reply, Request, Response};
 use std::cell::RefCell;
-use std::ffi::{CStr, CString, c_char};
 
-struct State {
+struct Session {
     view: View,
-    frame: (u32, u32, *const u8),
-    text: CString,
-    error: CString,
+    seen: ViewState,
+}
+
+#[derive(Default)]
+struct State {
+    session: Option<Session>,
+    response: Vec<u8>,
+    payload: Payload,
+}
+
+/// The reply's binary payload. A frame stays in KLayout's buffer rather
+/// than being copied.
+#[derive(Default)]
+enum Payload {
+    #[default]
+    None,
+    Owned(Vec<u8>),
+    Borrowed(*const u8, usize),
 }
 
 thread_local! {
-    static STATE: RefCell<Option<State>> = const { RefCell::new(None) };
+    static STATE: RefCell<State> = RefCell::new(State::default());
 }
 
-/// Where uploaded layouts are written in the Emscripten filesystem.
+/// Where uploaded files go in the Emscripten filesystem.
 const LAYOUT_PATH: &str = "/layout.bin";
+const LYP_PATH: &str = "/layers.lyp";
 
-fn with<R>(fail: R, f: impl FnOnce(&mut State) -> Result<R, klayout_sys::Error>) -> R {
-    STATE.with_borrow_mut(|state| match state.as_mut() {
-        None => fail,
-        Some(state) => f(state).unwrap_or_else(|e| {
-            state.error = CString::new(e.0).unwrap_or_default();
-            fail
-        }),
+fn io(e: std::io::Error) -> Error {
+    Error(e.to_string())
+}
+
+fn handle(state: &mut State, request: Request, input: &[u8]) -> Result<Reply, Error> {
+    if let Request::Hello { protocol, editable } = request {
+        if protocol != PROTOCOL {
+            return Err(Error(format!("protocol {protocol} requested; this module speaks {PROTOCOL}")));
+        }
+        let mut view = View::new(editable)?;
+        let seen = view.state()?;
+        let modes = view.mode_names();
+        state.session = Some(Session { view, seen });
+        return Ok(Reply::Hello { protocol: PROTOCOL, klayout: klayout_sys::KLAYOUT_VERSION, modes });
+    }
+    let session = state.session.as_mut().ok_or_else(|| Error("send hello first".into()))?;
+    let view = &mut session.view;
+    Ok(match request {
+        Request::Hello { .. } => unreachable!("handled above"),
+        Request::Open => {
+            std::fs::write(LAYOUT_PATH, input).map_err(io)?;
+            view.load(LAYOUT_PATH)?;
+            Reply::Opened { dbu: view.dbu()?, cells: view.cells()?, layers: view.layers()? }
+        }
+        Request::Export { format } => {
+            state.payload = Payload::Owned(view.export(format)?);
+            Reply::Bytes
+        }
+        Request::Resize { width, height } => {
+            view.resize(width, height)?;
+            Reply::Ok
+        }
+        Request::Frame => {
+            let frame = view.frame()?;
+            state.payload = Payload::Borrowed(frame.rgba.as_ptr(), frame.rgba.len());
+            Reply::Frame { width: frame.width, height: frame.height }
+        }
+        Request::Mouse { event, x, y, buttons } => {
+            view.mouse(event, x, y, buttons)?;
+            Reply::Ok
+        }
+        Request::Wheel { delta, horizontal, x, y, buttons } => {
+            view.wheel(delta, horizontal, x, y, buttons)?;
+            Reply::Ok
+        }
+        Request::Key { key, buttons } => {
+            view.key(key, buttons)?;
+            Reply::Ok
+        }
+        Request::ZoomFit => {
+            view.zoom_fit()?;
+            Reply::Ok
+        }
+        Request::SwitchMode { mode } => {
+            view.switch_mode(&mode)?;
+            Reply::Ok
+        }
+        Request::SetCurrentLayer { layer } => Reply::CurrentLayer { found: view.set_current_layer(layer.layer, layer.datatype)? },
+        Request::Undo => {
+            view.undo()?;
+            Reply::Ok
+        }
+        Request::Redo => {
+            view.redo()?;
+            Reply::Ok
+        }
+        Request::Command { command } => {
+            view.command(command)?;
+            Reply::Ok
+        }
+        Request::Cells => Reply::Cells { cells: view.cells()? },
+        Request::Layers => Reply::Layers { layers: view.layers()? },
+        Request::Shapes { cell, layer } => Reply::Shapes { shapes: view.shapes(&cell, layer)? },
+        Request::Instances { cell } => Reply::Instances { instances: view.instances(&cell)? },
+        Request::Selection => Reply::Selection { selection: view.selection()? },
+        Request::Edit { description, edits } => {
+            view.edit(&description, &edits)?;
+            Reply::Ok
+        }
+        Request::LayerPanel => Reply::LayerPanel { entries: view.layer_panel()? },
+        Request::SetLayerVisible { id, visible } => {
+            view.set_layer_visible(id, visible)?;
+            Reply::Ok
+        }
+        Request::LoadLayerProperties => {
+            std::fs::write(LYP_PATH, input).map_err(io)?;
+            view.load_layer_properties(LYP_PATH)?;
+            Reply::Ok
+        }
+        Request::SaveLayerProperties => {
+            view.save_layer_properties(LYP_PATH)?;
+            state.payload = Payload::Owned(std::fs::read(LYP_PATH).map_err(io)?);
+            Reply::Bytes
+        }
     })
 }
 
-fn ok(result: Result<(), klayout_sys::Error>) -> Result<i32, klayout_sys::Error> {
-    result.map(|()| 0)
-}
-
-/// Creates the view. Returns 0, or -1 if KLayout could not construct it.
-#[unsafe(no_mangle)]
-pub extern "C" fn klw_new(editable: i32) -> i32 {
-    match View::new(editable != 0) {
-        Ok(view) => {
-            STATE.set(Some(State {
-                view,
-                frame: (0, 0, std::ptr::null()),
-                text: CString::default(),
-                error: CString::default(),
-            }));
-            0
-        }
-        Err(_) => -1,
+/// What changed since the previous call, however it changed: through this
+/// request, or through KLayout's own tools reacting to input.
+fn events(session: &mut Session, opened: bool) -> Result<Vec<Event>, Error> {
+    let now = session.view.state()?;
+    let seen = std::mem::replace(&mut session.seen, now.clone());
+    let mut events = Vec::new();
+    if opened || now.revision != seen.revision || now.history != seen.history {
+        events.push(Event::LayoutChanged { history: now.history });
     }
+    if now.selection != seen.selection {
+        events.push(Event::SelectionChanged);
+    }
+    if opened || now.layer_panel != seen.layer_panel {
+        events.push(Event::LayerPanelChanged);
+    }
+    if now.mode != seen.mode {
+        events.push(Event::ModeChanged { mode: now.mode });
+    }
+    Ok(events)
 }
 
-/// Loads GDS2 or OASIS bytes (detected from the content) and fits them.
+fn call(state: &mut State, request: &[u8], input: &[u8]) -> Response {
+    state.payload = Payload::None;
+    let reply = match serde_json::from_slice::<Request>(request) {
+        Err(e) => Err(Error(format!("bad request: {e}"))),
+        Ok(request) => {
+            let opened = matches!(request, Request::Open);
+            handle(state, request, input).map(|reply| (reply, opened))
+        }
+    };
+    let (reply, opened) = reply.unwrap_or_else(|e| (Reply::Error { message: e.0 }, false));
+    let events = match state.session.as_mut() {
+        None => Vec::new(),
+        Some(session) => events(session, opened).unwrap_or_default(),
+    };
+    Response { reply, events }
+}
+
+/// Handles one request; see the module documentation.
 ///
 /// # Safety
-/// `data` must point to `len` readable bytes.
+/// `request` must point to `request_len` readable bytes and `payload` to
+/// `payload_len` (or be null with length 0).
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn klw_load(data: *const u8, len: usize) -> i32 {
+pub unsafe extern "C" fn klw_call(request: *const u8, request_len: usize, payload: *const u8, payload_len: usize) -> *const u8 {
     // SAFETY: guaranteed by the caller.
-    let bytes = unsafe { std::slice::from_raw_parts(data, len) };
-    with(-1, |s| {
-        std::fs::write(LAYOUT_PATH, bytes).map_err(|e| klayout_sys::Error(e.to_string()))?;
-        ok(s.view.load(LAYOUT_PATH))
+    let request = unsafe { bytes(request, request_len) };
+    let input = unsafe { bytes(payload, payload_len) };
+    STATE.with_borrow_mut(|state| {
+        let response = call(state, request, input);
+        state.response = serde_json::to_vec(&response).expect("responses always serialize");
+        state.response.as_ptr()
+    })
+}
+
+unsafe fn bytes<'a>(p: *const u8, len: usize) -> &'a [u8] {
+    if len == 0 { &[] } else { unsafe { std::slice::from_raw_parts(p, len) } }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn klw_response_len() -> usize {
+    STATE.with_borrow(|s| s.response.len())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn klw_payload() -> *const u8 {
+    STATE.with_borrow(|s| match &s.payload {
+        Payload::None => std::ptr::null(),
+        Payload::Owned(v) => v.as_ptr(),
+        Payload::Borrowed(p, _) => *p,
     })
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn klw_resize(width: u32, height: u32) -> i32 {
-    with(-1, |s| ok(s.view.resize(width, height)))
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn klw_zoom_fit() -> i32 {
-    with(-1, |s| ok(s.view.zoom_fit()))
-}
-
-/// Newline-separated mode names, valid until the next text-returning call.
-#[unsafe(no_mangle)]
-pub extern "C" fn klw_modes() -> *const c_char {
-    with(std::ptr::null(), |s| {
-        s.text = CString::new(s.view.mode_names().join("\n")).unwrap_or_default();
-        Ok(s.text.as_ptr())
+pub extern "C" fn klw_payload_len() -> usize {
+    STATE.with_borrow(|s| match &s.payload {
+        Payload::None => 0,
+        Payload::Owned(v) => v.len(),
+        Payload::Borrowed(_, n) => *n,
     })
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn klw_mode() -> *const c_char {
-    with(std::ptr::null(), |s| {
-        s.text = CString::new(s.view.mode_name()).unwrap_or_default();
-        Ok(s.text.as_ptr())
-    })
-}
-
-/// # Safety
-/// `name` must be a NUL-terminated string.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn klw_switch_mode(name: *const c_char) -> i32 {
-    // SAFETY: guaranteed by the caller.
-    let name = unsafe { CStr::from_ptr(name) }.to_string_lossy();
-    with(-1, |s| ok(s.view.switch_mode(&name)))
-}
-
-/// `kind`: 0 move, 1 press, 2 release, 3 double click, 4 enter, 5 leave.
-#[unsafe(no_mangle)]
-pub extern "C" fn klw_mouse(kind: i32, x: f64, y: f64, buttons: u32) -> i32 {
-    let event = match kind {
-        0 => Mouse::Move,
-        1 => Mouse::Press,
-        2 => Mouse::Release,
-        3 => Mouse::DoubleClick,
-        4 => Mouse::Enter,
-        5 => Mouse::Leave,
-        _ => return -1,
-    };
-    with(-1, |s| ok(s.view.mouse(event, x, y, buttons)))
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn klw_wheel(delta: i32, horizontal: i32, x: f64, y: f64, buttons: u32) -> i32 {
-    with(-1, |s| ok(s.view.wheel(delta, horizontal != 0, x, y, buttons)))
-}
-
-/// `key` is a Qt key code, as KLayout expects.
-#[unsafe(no_mangle)]
-pub extern "C" fn klw_key(key: u32, buttons: u32) -> i32 {
-    with(-1, |s| ok(s.view.key(key, buttons)))
-}
-
-/// Renders the current frame. Returns a pointer to `width * height * 4`
-/// RGBA bytes (see `klw_frame_width`/`klw_frame_height`), valid until the
-/// next call into the module, or null on error.
-#[unsafe(no_mangle)]
-pub extern "C" fn klw_frame() -> *const u8 {
-    with(std::ptr::null(), |s| {
-        let frame = s.view.frame()?;
-        s.frame = (frame.width, frame.height, frame.rgba.as_ptr());
-        Ok(s.frame.2)
-    })
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn klw_frame_width() -> u32 {
-    with(0, |s| Ok(s.frame.0))
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn klw_frame_height() -> u32 {
-    with(0, |s| Ok(s.frame.1))
-}
-
-/// Returns 1 if the view shows `layer/datatype` and it is now current, 0 if
-/// the view does not show it, -1 on error.
-#[unsafe(no_mangle)]
-pub extern "C" fn klw_set_current_layer(layer: i32, datatype: i32) -> i32 {
-    with(-1, |s| s.view.set_current_layer(layer, datatype).map(i32::from))
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn klw_undo() -> i32 {
-    with(-1, |s| ok(s.view.undo()))
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn klw_redo() -> i32 {
-    with(-1, |s| ok(s.view.redo()))
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn klw_shape_count() -> usize {
-    with(0, |s| Ok(s.view.shape_count()))
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn klw_error() -> *const c_char {
-    with(std::ptr::null(), |s| Ok(s.error.as_ptr()))
 }
 
 fn main() {}

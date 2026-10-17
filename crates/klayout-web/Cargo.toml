@@ -12,4 +12,6 @@ name = "klayout_web"
 path = "src/main.rs"
 
 [dependencies]
-klayout-sys = { path = "../klayout-sys" }
+klayout-sys = { path = "../klayout-sys", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

@@ -22,8 +22,12 @@
     <label>Layout <input id="file" type="file" accept=".gds,.gds2,.oas,.gds.gz"></label>
     <span id="modes"></span>
     <label>Layer <input id="layer" value="1/0" size="6"></label>
-    <button id="undo">Undo</button>
-    <button id="redo">Redo</button>
+    <button id="undo" disabled>Undo</button>
+    <button id="redo" disabled>Redo</button>
+    <button data-command="cut">Cut</button>
+    <button data-command="copy">Copy</button>
+    <button data-command="paste_move">Paste</button>
+    <button data-command="delete">Delete</button>
     <button id="fit">Fit</button>
   </header>
   <div id="stage"><canvas id="canvas" tabindex="0"></canvas></div>

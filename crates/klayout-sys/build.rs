@@ -82,6 +82,16 @@ fn main() {
     }
 
     let target = env::var("TARGET").unwrap();
+    // The KLayout release the submodule holds, from KLayout's own version.sh.
+    let version_sh = src.parent().expect("src has a parent").join("version.sh");
+    let version = std::fs::read_to_string(&version_sh)
+        .expect("vendor/klayout/version.sh")
+        .lines()
+        .find_map(|l| l.strip_prefix("KLAYOUT_VERSION=\"")?.strip_suffix('"').map(str::to_owned))
+        .expect("KLAYOUT_VERSION in version.sh");
+    println!("cargo:rustc-env=KLAYOUT_VERSION={version}");
+    println!("cargo:rerun-if-changed={}", version_sh.display());
+
     if target != "wasm32-unknown-emscripten" {
         // Host builds are for tooling (cargo check, clippy, docs); KLayout
         // itself is only built for the browser target.

@@ -1,30 +1,39 @@
 // Forwards canvas input to KLayout's view and paints the frames it renders.
-// Everything about modes, snapping, selection and editing happens in KLayout.
+// Everything about modes, snapping, selection and editing happens in KLayout;
+// this page only translates browser events into protocol requests.
 
 import createKlayout from "./klayout_web.js";
+import { connect } from "./klayout.js";
 
 const $ = (id) => document.getElementById(id);
 const canvas = $("canvas");
 const ctx = canvas.getContext("2d");
 const status = (text) => ($("status").textContent = text);
 
-const k = await createKlayout();
-const call = (name, ...args) => {
-  const result = k[`_klw_${name}`](...args);
-  if (result === -1) throw new Error(`${name}: ${k.UTF8ToString(k._klw_error())}`);
-  return result;
-};
-const withString = (s, f) => {
-  const p = k.stringToNewUTF8(s);
-  try { return f(p); } finally { k._free(p); }
-};
+const k = await connect(createKlayout);
+let mode = "select";
+let shapes = "";
 
-// lay::ShiftButton etc.
-const SHIFT = 0x01, CONTROL = 0x02, ALT = 0x04, LEFT = 0x08, MIDDLE = 0x10, RIGHT = 0x20;
-const modifiers = (e) => (e.shiftKey ? SHIFT : 0) | (e.ctrlKey || e.metaKey ? CONTROL : 0) | (e.altKey ? ALT : 0);
-const held = (e) => (e.buttons & 1 ? LEFT : 0) | (e.buttons & 2 ? RIGHT : 0) | (e.buttons & 4 ? MIDDLE : 0);
-const pressed = (e) => [LEFT, MIDDLE, RIGHT][e.button] ?? 0;
-const at = (e) => { const r = canvas.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+// Every response reports what changed, whoever changed it.
+function call(request, payload) {
+  const response = k.call(request, payload);
+  for (const event of response.events) {
+    if (event.type === "layout_changed") {
+      const { undo, redo } = event.history;
+      $("undo").disabled = !undo;
+      $("undo").title = undo ? `Undo ${undo}` : "";
+      $("redo").disabled = !redo;
+      $("redo").title = redo ? `Redo ${redo}` : "";
+    } else if (event.type === "mode_changed") {
+      mode = event.mode;
+      for (const b of $("modes").children) b.setAttribute("aria-pressed", String(b.textContent === mode));
+    } else if (event.type === "selection_changed") {
+      const n = k.call({ type: "selection" }).reply.selection.length;
+      shapes = n ? `${n} selected` : "";
+    }
+  }
+  return response;
+}
 
 let pending = false;
 function paint() {
@@ -32,99 +41,122 @@ function paint() {
   pending = true;
   requestAnimationFrame(() => {
     pending = false;
-    const ptr = k._klw_frame();
-    if (!ptr) return status(k.UTF8ToString(k._klw_error()));
-    const w = k._klw_frame_width(), h = k._klw_frame_height();
-    if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
-    ctx.putImageData(new ImageData(new Uint8ClampedArray(k.HEAPU8.buffer, ptr, w * h * 4).slice(), w, h), 0, 0);
-    status(`${w}×${h} · mode ${k.UTF8ToString(k._klw_mode())} · ${k._klw_shape_count()} shapes`);
+    try {
+      const { reply, payload } = call({ type: "frame" });
+      const { width: w, height: h } = reply;
+      if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+      ctx.putImageData(new ImageData(new Uint8ClampedArray(payload).slice(), w, h), 0, 0);
+      status(`${w}×${h} · mode ${mode}${shapes ? ` · ${shapes}` : ""}`);
+    } catch (err) {
+      status(String(err));
+    }
   });
 }
 
 function input(f) {
-  return (e) => {
-    try { f(e); } catch (err) { status(String(err)); }
+  return async (e) => {
+    try { await f(e); } catch (err) { status(String(err)); }
     paint();
   };
 }
 
+const buttons = (e, pressed) => ({
+  left: pressed ? e.button === 0 : (e.buttons & 1) !== 0,
+  middle: pressed ? e.button === 1 : (e.buttons & 4) !== 0,
+  right: pressed ? e.button === 2 : (e.buttons & 2) !== 0,
+  shift: e.shiftKey,
+  control: e.ctrlKey || e.metaKey,
+  alt: e.altKey,
+});
+const at = (e) => { const r = canvas.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+const mouse = (event, e, pressed) => call({ type: "mouse", event, ...at(e), buttons: buttons(e, pressed) });
+
 function resize() {
   const r = canvas.getBoundingClientRect();
-  call("resize", Math.max(1, Math.floor(r.width)), Math.max(1, Math.floor(r.height)));
+  call({ type: "resize", width: Math.max(1, Math.floor(r.width)), height: Math.max(1, Math.floor(r.height)) });
   paint();
 }
 
-function load(bytes) {
-  const p = k._malloc(bytes.length);
-  k.HEAPU8.set(bytes, p);
-  try { call("load", p, bytes.length); } finally { k._free(p); }
+function open(bytes) {
+  call({ type: "open" }, bytes);
   applyLayer();
-  paint();
 }
 
 function applyLayer() {
   const [layer, datatype] = $("layer").value.split("/").map(Number);
-  const found = call("set_current_layer", layer, datatype || 0);
+  const { found } = call({ type: "set_current_layer", layer: { layer, datatype: datatype || 0 } }).reply;
   if (!found) status(`layer ${$("layer").value} is not in this layout`);
 }
 
-function buildModes() {
-  const names = k.UTF8ToString(k._klw_modes()).split("\n").filter(Boolean);
-  for (const name of names) {
-    const b = document.createElement("button");
-    b.textContent = name;
-    b.onclick = input(() => {
-      withString(name, (p) => call("switch_mode", p));
-      for (const other of $("modes").children) other.setAttribute("aria-pressed", String(other === b));
-      canvas.focus();
-    });
-    $("modes").append(b);
-  }
+for (const name of k.hello.modes) {
+  const b = document.createElement("button");
+  b.textContent = name;
+  b.setAttribute("aria-pressed", String(name === mode));
+  b.onclick = input(() => {
+    call({ type: "switch_mode", mode: name });
+    canvas.focus();
+  });
+  $("modes").append(b);
 }
 
-// Qt key codes for the keys KLayout's tools react to.
-const QT_KEYS = {
-  Escape: 0x01000000, Tab: 0x01000001, Backspace: 0x01000003, Enter: 0x01000004,
-  Delete: 0x01000007, ArrowLeft: 0x01000012, ArrowUp: 0x01000013, ArrowRight: 0x01000014, ArrowDown: 0x01000015,
-};
-const qtKey = (e) => QT_KEYS[e.key] ?? (e.key.length === 1 ? e.key.toUpperCase().charCodeAt(0) : 0);
+// Keys KLayout's tools handle themselves.
+const KEYS = { Escape: "escape", Tab: "tab", Enter: "enter", ArrowLeft: "left", ArrowUp: "up", ArrowRight: "right", ArrowDown: "down" };
+// Desktop KLayout's Edit menu shortcuts.
+const SHORTCUTS = { x: "cut", c: "copy", v: "paste_move", a: "select_all" };
 
-canvas.addEventListener("pointermove", input((e) => call("mouse", 0, ...at(e), held(e) | modifiers(e))));
+function key(e) {
+  const command = e.ctrlKey || e.metaKey ? SHORTCUTS[e.key.toLowerCase()] : undefined;
+  if (command) return { type: "command", command };
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") return { type: e.shiftKey ? "redo" : "undo" };
+  if (e.key === "Delete" || e.key === "Backspace") return { type: "command", command: "delete" };
+  if (e.key === "Escape") return { type: "command", command: "cancel" };
+  const named = KEYS[e.key];
+  if (named) return { type: "key", key: named, buttons: buttons(e, false) };
+  if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) return { type: "key", key: { char: e.key }, buttons: buttons(e, false) };
+  return null;
+}
+
+canvas.addEventListener("pointermove", input((e) => mouse("move", e, false)));
 canvas.addEventListener("pointerdown", input((e) => {
   canvas.setPointerCapture(e.pointerId);
   canvas.focus();
-  call("mouse", 1, ...at(e), pressed(e) | modifiers(e));
+  mouse("press", e, true);
 }));
-canvas.addEventListener("pointerup", input((e) => call("mouse", 2, ...at(e), pressed(e) | modifiers(e))));
-canvas.addEventListener("dblclick", input((e) => call("mouse", 3, ...at(e), LEFT | modifiers(e))));
-canvas.addEventListener("pointerenter", input(() => call("mouse", 4, 0, 0, 0)));
-canvas.addEventListener("pointerleave", input(() => call("mouse", 5, 0, 0, 0)));
+canvas.addEventListener("pointerup", input((e) => mouse("release", e, true)));
+canvas.addEventListener("dblclick", input((e) => mouse("double_click", e, true)));
+canvas.addEventListener("pointerenter", input(() => call({ type: "mouse", event: "enter", x: 0, y: 0 })));
+canvas.addEventListener("pointerleave", input(() => call({ type: "mouse", event: "leave", x: 0, y: 0 })));
 canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 canvas.addEventListener("wheel", input((e) => {
   e.preventDefault();
   // Qt reports 120 per wheel notch; browsers report ~100 pixels.
   const horizontal = Math.abs(e.deltaX) > Math.abs(e.deltaY);
   const delta = Math.round(-(horizontal ? e.deltaX : e.deltaY) * 1.2);
-  call("wheel", delta, horizontal ? 1 : 0, ...at(e), held(e) | modifiers(e));
+  call({ type: "wheel", delta, horizontal, ...at(e), buttons: buttons(e, false) });
 }), { passive: false });
 canvas.addEventListener("keydown", input((e) => {
-  const key = qtKey(e);
-  if (!key) return;
+  const request = key(e);
+  if (!request) return;
   e.preventDefault();
-  call("key", key, modifiers(e));
+  call(request);
 }));
 
 $("file").onchange = input(async () => {
   const file = $("file").files[0];
-  if (file) load(new Uint8Array(await file.arrayBuffer()));
+  if (file) open(new Uint8Array(await file.arrayBuffer()));
 });
 $("layer").onchange = input(applyLayer);
-$("undo").onclick = input(() => call("undo"));
-$("redo").onclick = input(() => call("redo"));
-$("fit").onclick = input(() => call("zoom_fit"));
+$("undo").onclick = input(() => call({ type: "undo" }));
+$("redo").onclick = input(() => call({ type: "redo" }));
+$("fit").onclick = input(() => call({ type: "zoom_fit" }));
+for (const b of document.querySelectorAll("[data-command]")) {
+  b.onclick = input(() => {
+    call({ type: "command", command: b.dataset.command });
+    canvas.focus();
+  });
+}
 new ResizeObserver(resize).observe(canvas);
 
-call("new", 1);
-buildModes();
 resize();
-load(new Uint8Array(await (await fetch("./ringo.gds")).arrayBuffer()));
+open(new Uint8Array(await (await fetch("./ringo.gds")).arrayBuffer()));
+paint();
