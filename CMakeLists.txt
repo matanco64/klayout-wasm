@@ -106,4 +106,7 @@ target_link_options (klayout PRIVATE
   -sMODULARIZE=1
   -sEXPORT_ES6=1
   -sEXPORT_NAME=createKlayout
-  -sENVIRONMENT=web,worker,node)
+  -sENVIRONMENT=web,worker,node
+  # No eval or new Function, so pages with a strict CSP (VS Code webviews) can
+  # load it; Embind then uses its generic invokers.
+  -sDYNAMIC_EXECUTION=0)
