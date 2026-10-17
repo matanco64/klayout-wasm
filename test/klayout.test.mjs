@@ -303,6 +303,18 @@ for (const [x, y] of [[100, 200], [200, 100]]) {
   empty.mouse("release", x, y, LEFT);
 }
 assert.equal(empty.shapes(empty.currentCell(), metal1.layer).length, 1, "the box is on 34/0");
+// Editing the selected shape drops the selection, which would point at the erased shape.
+empty.switchMode("select");
+empty.command("selectAll");
+const [picked] = empty.selection();
+assert.equal(picked.kind, "shape");
+empty.changes();
+empty.edit("Widen", [
+  { op: "eraseShape", cell: picked.cell, layer: picked.layer, shape: picked.shape },
+  { op: "insertShape", cell: picked.cell, layer: picked.layer, shape: { ...picked.shape, right: picked.shape.right + 50 } },
+]);
+assert.deepEqual(empty.selection(), []);
+assert.ok(types(empty.changes()).includes("selectionChanged"));
 empty.frame();  // the panel picks up new layers when the view next updates
 assert.equal(empty.layerPanel().find((e) => e.label.startsWith("Metal1")).present, true);
 empty.delete();

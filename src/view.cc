@@ -566,6 +566,11 @@ void View::edit (const std::string &description, const EditList &edits)
     db::Layout &l = layout ();
     bool created_layer = false;
     unsigned int n = edits["length"].as<unsigned int> ();
+    // The selection refers to shapes by position in their containers; an
+    // edit may erase or move them, so it is dropped first, as KLayout's own
+    // editing functions do.
+    m_view->cancel_edits ();
+    m_view->clear_selection ();
     m_manager.transaction (description);
     try {
       for (unsigned int i = 0; i < n; ++i) {
