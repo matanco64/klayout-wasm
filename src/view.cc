@@ -15,8 +15,15 @@
 #include "tlPixelBuffer.h"
 #include "tlStream.h"
 
+#include <cmath>
 #include <fstream>
 #include <iterator>
+
+namespace lay
+{
+// The canvas's device pixel ratio, patched in by tools/klayout_sources.py.
+extern double wasm_device_pixel_ratio;
+}
 
 namespace kl
 {
@@ -142,7 +149,11 @@ Bytes View::export_layout (const Format &format)
 
 void View::resize (unsigned int width, unsigned int height)
 {
-  guarded ([&] { m_view->resize (width, height); });
+  guarded ([&] {
+    m_view->resize (width, height);
+    m_width = width;
+    m_height = height;
+  });
 }
 
 Frame View::frame ()
@@ -215,6 +226,140 @@ void View::key (const Key &key, const Buttons &buttons)
 void View::zoom_fit ()
 {
   guarded ([&] { m_view->zoom_fit (); });
+}
+
+void View::set_device_pixel_ratio (double ratio)
+{
+  guarded ([&] {
+    if (! std::isfinite (ratio) || ratio < 0.25 || ratio > 8.0) {
+      throw tl::Exception ("ratio: expected a number from 0.25 to 8");
+    }
+    lay::wasm_device_pixel_ratio = ratio;
+    // The canvas sizes its pixel buffer and line widths from the ratio when
+    // it is resized; resize to the same CSS size to apply it.
+    m_view->resize (m_width, m_height);
+  });
+}
+
+// Each field is optional; the ones given are set through KLayout's own
+// configuration keys, as its setup dialogs do.
+void View::configure (const ViewConfig &config)
+{
+  guarded ([&] {
+    static const char *const angles[] = { "any", "diagonal", "ortho" };
+    static const char *const keys[] = { "grid", "editGrid", "snapToObjects", "gridVisible", "background", "connectAngle" };
+    if (config.isNull () || config.typeOf ().as<std::string> () != "object") {
+      throw tl::Exception ("config: expected an object");
+    }
+    // A misspelt key would otherwise be ignored silently.
+    val names = val::global ("Object").call<val> ("keys", config);
+    for (unsigned int i = 0; i < names["length"].as<unsigned int> (); ++i) {
+      std::string k = names[i].as<std::string> ();
+      bool known = false;
+      for (const char *n : keys) {
+        known = known || k == n;
+      }
+      if (! known) {
+        throw tl::Exception ("config: unknown field \"" + k + "\"");
+      }
+    }
+    auto micron = [] (const val &v, const char *what) {
+      double d = to_f64 (v, what);
+      if (! (d > 0.0)) {
+        throw tl::Exception (std::string (what) + ": expected a positive number of microns");
+      }
+      return tl::to_string (d);
+    };
+    // Read and check everything before setting anything.
+    std::vector<std::pair<std::string, std::string>> settings;
+    if (has (config, "grid")) {
+      settings.emplace_back ("grid-micron", micron (config["grid"], "grid"));
+    }
+    if (has (config, "editGrid")) {
+      val g = config["editGrid"];
+      // null: snap to the display grid.
+      settings.emplace_back ("edit-grid", g.isNull () ? std::string () : micron (g, "editGrid"));
+    }
+    if (has (config, "snapToObjects")) {
+      settings.emplace_back ("edit-snap-to-objects", to_bool (config["snapToObjects"], "snapToObjects") ? "true" : "false");
+    }
+    if (has (config, "gridVisible")) {
+      settings.emplace_back ("grid-visible", to_bool (config["gridVisible"], "gridVisible") ? "true" : "false");
+    }
+    if (has (config, "background")) {
+      std::string c = to_string (config["background"], "background");
+      if (c.size () != 7 || c[0] != '#' || c.find_first_not_of ("0123456789abcdefABCDEF", 1) != std::string::npos) {
+        throw tl::Exception ("background: expected \"#rrggbb\"");
+      }
+      settings.emplace_back ("background-color", c);
+    }
+    if (has (config, "connectAngle")) {
+      std::string a = to_string (config["connectAngle"], "connectAngle");
+      bool known = false;
+      for (const char *n : angles) {
+        known = known || a == n;
+      }
+      if (! known) {
+        throw tl::Exception ("connectAngle: unknown value \"" + a + "\"");
+      }
+      settings.emplace_back ("edit-connect-angle-mode", a);
+    }
+    for (const auto &s : settings) {
+      m_view->config_set (s.first, s.second);
+    }
+    m_view->config_end ();
+  });
+}
+
+Rect View::viewport ()
+{
+  return guarded ([&] {
+    db::DBox b = m_view->box ();
+    return Rect (from_box (db::Box (b.transformed (db::VCplxTrans (1.0 / layout ().dbu ())))));
+  });
+}
+
+void View::zoom_box (const Rect &box)
+{
+  guarded ([&] {
+    db::Box b = to_box (box);
+    if (b.empty () || b.width () == 0 || b.height () == 0) {
+      throw tl::Exception ("box: expected a box with a width and a height");
+    }
+    m_view->zoom_box (db::DBox (b.transformed (db::CplxTrans (layout ().dbu ()))));
+  });
+}
+
+// The layout point under CSS pixel (x, y), in DBU.
+Point View::point_at (double x, double y)
+{
+  return guarded ([&] {
+    db::DPoint um = m_view->canvas ()->pixel_to_um (db::DPoint (x, y));
+    db::Point p = db::VCplxTrans (1.0 / layout ().dbu ()) * um;
+    val o = val::object ();
+    o.set ("x", p.x ());
+    o.set ("y", p.y ());
+    return Point (o);
+  });
+}
+
+void View::show_cell (const std::string &name)
+{
+  guarded ([&] {
+    db::Cell &c = cell (name);
+    m_view->select_cell_fit (c.cell_index (), 0);
+  });
+}
+
+OptionalString View::current_cell ()
+{
+  return guarded ([&] {
+    if (m_view->cellviews () == 0 || ! m_view->cellview (0).is_valid ()) {
+      return OptionalString (val::null ());
+    }
+    const lay::CellView &cv = m_view->cellview (0);
+    return OptionalString (val (std::string (cv->layout ().cell_name (cv.cell_index ()))));
+  });
 }
 
 StringList View::modes ()

@@ -211,8 +211,79 @@ console.log(`.lyp: ${lyp.length} bytes, round-trips visibility`);
 view.open(gds);
 assert.deepEqual(types(view.changes()), ["layoutChanged", "layerPanelChanged"]);
 assert.ok(view.cells().some((c) => c.name === cell));
-
+assert.deepEqual(view.history(), { undo: null, redo: null }, "reopening clears the undo history");
 view.delete();
+
+// HiDPI, settings, viewport and cells, on a fresh view.
+const hd = new k.View(true);
+hd.resize(400, 300);
+hd.open(ringo);
+hd.changes();
+const fit = hd.viewport();
+hd.setDevicePixelRatio(2);
+let f = hd.frame();
+assert.deepEqual([f.width, f.height], [800, 600], "frames come out in device pixels");
+const pixel = (fit.right - fit.left) / 400;
+const near = (a, b) => ["left", "bottom", "right", "top"].every((e) => Math.abs(a[e] - b[e]) <= pixel);
+assert.ok(near(hd.viewport(), fit), "the ratio does not change what is shown, to within a CSS pixel");
+const centre = hd.pointAt(200, 150);
+assert.ok(Math.abs(centre.x - (fit.left + fit.right) / 2) < (fit.right - fit.left) / 100, "pointAt takes CSS pixels");
+hd.setDevicePixelRatio(1);
+f = hd.frame();
+assert.deepEqual([f.width, f.height], [400, 300]);
+assert.throws(() => hd.setDevicePixelRatio(0), /ratio: expected a number from 0.25 to 8/);
+console.log("devicePixelRatio: 2 gives 800x600 frames for a 400x300 view; pointAt in CSS pixels");
+
+const target = { left: 0, bottom: 0, right: 4000, top: 3000 };
+hd.zoomBox(target);
+const shown = hd.viewport();
+assert.ok(shown.left <= 0 && shown.bottom <= 0 && shown.right >= 4000 && shown.top >= 3000, "zoomBox shows at least the box");
+assert.ok(shown.right - shown.left < 4100 && shown.top - shown.bottom < 3100, "and not much more");
+assert.deepEqual(hd.pointAt(0, 299), { x: shown.left, y: shown.bottom }, "bottom-left pixel");
+assert.throws(() => hd.zoomBox({ left: 0, bottom: 0, right: 0, top: 10 }), /box: expected a box with a width and a height/);
+console.log("zoomBox / viewport:", JSON.stringify(shown));
+
+// An edit grid of 0.005 um: the box tool snaps clicks to multiples of 5 DBU.
+assert.throws(() => hd.configure({ grid: 0.005, editgrid: 0.005 }), /config: unknown field "editgrid"/);
+assert.throws(() => hd.configure({ grid: -1 }), /grid: expected a positive number of microns/);
+assert.throws(() => hd.configure({ connectAngle: "sideways" }), /connectAngle: unknown value "sideways"/);
+assert.throws(() => hd.configure({ background: "red" }), /background: expected "#rrggbb"/);
+const drawBox = (grid) => {
+  hd.configure({ grid: 0.001, editGrid: grid, snapToObjects: false, gridVisible: true, background: "#202020", connectAngle: "ortho" });
+  hd.zoomBox({ left: 0, bottom: 0, right: 400, top: 300 });  // 1 DBU per CSS pixel
+  hd.setCurrentLayer({ layer: 1, datatype: 0 });
+  const boxes = () => hd.shapes(hd.currentCell(), { layer: 1, datatype: 0 }).map((s) => JSON.stringify(s));
+  const before = new Set(boxes());
+  hd.switchMode("box");
+  hd.mouse("enter", 0, 0, NONE);
+  for (const [x, y] of [[103, 197], [251, 122]]) {
+    hd.mouse("move", x, y, NONE);
+    hd.mouse("press", x, y, LEFT);
+    hd.mouse("release", x, y, LEFT);
+  }
+  hd.switchMode("select");
+  const added = boxes().filter((s) => !before.has(s));
+  assert.equal(added.length, 1);
+  return JSON.parse(added[0]);
+};
+const free = drawBox(0.001);
+const snapped = drawBox(0.005);
+console.log("box on a 0.001 grid:", JSON.stringify(free), "on a 0.005 grid:", JSON.stringify(snapped));
+for (const v of [snapped.left, snapped.bottom, snapped.right, snapped.top]) assert.equal(v % 5, 0, "on the 0.005 um grid");
+assert.ok([free.left, free.bottom, free.right, free.top].some((v) => v % 5 !== 0), "the fine grid does not snap to 5");
+hd.configure({ editGrid: null });
+console.log("configure: edit grid snaps; bad settings rejected with the field named");
+
+// Choosing the shown cell.
+assert.equal(hd.currentCell(), top);
+const child = hd.cells().find((c) => !c.top && c.bbox).name;
+hd.showCell(child);
+assert.equal(hd.currentCell(), child);
+assert.throws(() => hd.showCell("NOPE"), /no cell named NOPE/);
+hd.showCell(top);
+assert.equal(new k.View(true).currentCell(), null, "no layout, no cell");
+console.log(`showCell: ${child}, then back to ${top}`);
+hd.delete();
 console.log("ok");
 
 function isDeepStrictEqual(a, b) {

@@ -64,7 +64,9 @@ micrometers each).
 | Area | Methods |
 |---|---|
 | Files | `open(bytes)`, `export("gds2" \| "oasis")`, `inspect(bytes)` (module function) |
-| Input and rendering | `resize`, `mouse`, `wheel`, `key`, `frame`, `zoomFit`, `modes`, `mode`, `switchMode`, `setCurrentLayer` |
+| Input and rendering | `resize`, `setDevicePixelRatio` (HiDPI frames, CSS-pixel input), `mouse`, `wheel`, `key`, `frame`, `modes`, `mode`, `switchMode`, `setCurrentLayer` |
+| Viewport and cells | `zoomFit`, `zoomBox(rect)`, `viewport()`, `pointAt(x, y)` (layout point under a CSS pixel), `showCell(name)`, `currentCell()` |
+| Settings | `configure({ grid, editGrid, snapToObjects, gridVisible, background, connectAngle })`, through KLayout's own configuration keys |
 | Reading | `dbu`, `cells`, `layers`, `shapes(cell, layer)`, `instances(cell)`, `selection` |
 | Writing | `edit(description, edits)`: insert/erase shapes and instances, create/delete/rename cells |
 | Edit menu | `command(...)`: delete, cut, copy, paste, pasteMove, selectAll, unselectAll, cancel |
@@ -140,12 +142,10 @@ and a half minutes on a 16-core machine. CMake writes
 - `klayout.wasm` is 28 MB uncompressed, 6.4 MB gzipped. Nothing has been
   done about size yet: `-Oz`, `wasm-opt`, and dropping the scripting
   declarations (`gsiDecl*`) are the obvious first steps.
-- Frames are rendered at CSS pixels; no devicePixelRatio handling yet.
-- The demo runs KLayout on the main thread; a Web Worker comes with the npm
-  package.
+- The demo runs KLayout on the main thread. The module is pure compute and
+  runs unchanged in a Web Worker, which is how silicon-studio hosts it.
 - Not carried through the API yet: user properties on shapes and instances
-  (GDS properties), KLayout's PCells and libraries, viewport get/set beyond
-  `zoomFit` and the wheel, and view-only markers.
+  (GDS properties), KLayout's PCells and libraries, and view-only markers.
 - KLayout's editor cannot select edges and edge pairs (DRC result types), so
   `selectAll` + `delete` leaves them, as on desktop.
 - `layoutChanged` comes from KLayout's undo journal, so a change made

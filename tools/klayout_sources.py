@@ -74,6 +74,18 @@ PATCHES = [
         "#elif defined(__EMSCRIPTEN__)\n\n  return size_t (__builtin_wasm_memory_size (0)) * 65536;\n\n"
         "#else\n#  error Unsupported platform\n#endif",
     ),
+    (
+        # Without Qt the canvas's device pixel ratio is fixed at 1. Make it
+        # settable (View::set_device_pixel_ratio), so a HiDPI screen gets
+        # frames in device pixels while mouse input stays in CSS pixels, as
+        # desktop KLayout does on Retina. One ratio per process: a module
+        # instance drives one view.
+        "laybasic/laybasic/layLayoutCanvas.cc",
+        "double\nLayoutCanvas::dpr () const\n{\n#if defined(HAVE_QT) && QT_VERSION >= 0x50000\n"
+        "  return widget () ? widget ()->devicePixelRatio () : 1.0;\n#else\n  return 1.0;\n#endif\n}",
+        "double wasm_device_pixel_ratio = 1.0;\n\n"
+        "double\nLayoutCanvas::dpr () const\n{\n  return wasm_device_pixel_ratio;\n}",
+    ),
 ]
 
 

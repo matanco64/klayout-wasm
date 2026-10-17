@@ -50,6 +50,10 @@ EMSCRIPTEN_DECLARE_VAL_TYPE (History)
 EMSCRIPTEN_DECLARE_VAL_TYPE (ChangeList)
 EMSCRIPTEN_DECLARE_VAL_TYPE (StringList)
 EMSCRIPTEN_DECLARE_VAL_TYPE (LayoutSummary)
+EMSCRIPTEN_DECLARE_VAL_TYPE (Point)
+EMSCRIPTEN_DECLARE_VAL_TYPE (Rect)
+EMSCRIPTEN_DECLARE_VAL_TYPE (ViewConfig)
+EMSCRIPTEN_DECLARE_VAL_TYPE (OptionalString)
 
 // Runs f, turning a C++ exception into a JavaScript Error. Every function
 // JavaScript can call goes through here.
@@ -84,6 +88,7 @@ val from_bytes (const uint8_t *data, size_t size);
 val from_layer (const db::LayerProperties &lp);
 db::LayerProperties to_layer (const val &v);
 val from_box (const db::Box &b);
+db::Box to_box (const val &v);
 // Undefined for user objects, which have no portable form.
 val from_shape (const db::Shape &s);
 db::Shape insert_shape (const val &v, db::Shapes &target);
@@ -110,6 +115,13 @@ public:
   void wheel (int delta, bool horizontal, double x, double y, const Buttons &buttons);
   void key (const Key &key, const Buttons &buttons);
   void zoom_fit ();
+  void set_device_pixel_ratio (double ratio);
+  void configure (const ViewConfig &config);
+  Rect viewport ();
+  void zoom_box (const Rect &box);
+  Point point_at (double x, double y);
+  void show_cell (const std::string &name);
+  OptionalString current_cell ();
 
   StringList modes ();
   std::string mode ();
@@ -159,6 +171,8 @@ private:
   std::unique_ptr<lay::LayoutView> m_view;
   std::vector<uint8_t> m_rgba;
   uint64_t m_selection_serial = 0, m_layer_panel_serial = 0;
+  // The CSS size last given to resize.
+  unsigned int m_width = 0, m_height = 0;
   State m_seen;
   bool m_opened = false;
 };

@@ -10,9 +10,7 @@ namespace kl
 {
 // Types that only appear inside other types still need registering to be
 // emitted.
-EMSCRIPTEN_DECLARE_VAL_TYPE (Point)
 EMSCRIPTEN_DECLARE_VAL_TYPE (Vector)
-EMSCRIPTEN_DECLARE_VAL_TYPE (Rect)
 EMSCRIPTEN_DECLARE_VAL_TYPE (Edge)
 EMSCRIPTEN_DECLARE_VAL_TYPE (Layer)
 EMSCRIPTEN_DECLARE_VAL_TYPE (Cell)
@@ -97,6 +95,14 @@ EMSCRIPTEN_BINDINGS (klayout)
   register_type<StringList> ("string[]");
   register_type<LayoutSummary> ("LayoutSummary", "{ format: string; dbu: number; cells: number; topCells: number; layers: number; shapes: number }");
 
+  // Display and editing settings; each field is optional and only the ones
+  // given change. grid: the display grid in microns. editGrid: the editing
+  // snap grid in microns, null to follow the display grid. connectAngle:
+  // the angles new paths and polygons may take.
+  register_type<ViewConfig> ("ViewConfig", "{ grid?: number; editGrid?: number | null; snapToObjects?: boolean; "
+                                           "gridVisible?: boolean; background?: string; "
+                                           "connectAngle?: 'any' | 'diagonal' | 'ortho' }");
+  register_type<OptionalString> ("OptionalString", "string | null");
   constant ("klayoutVersion", std::string (KLAYOUT_VERSION));
 
   function ("inspect(bytes)", &inspect);
@@ -113,6 +119,16 @@ EMSCRIPTEN_BINDINGS (klayout)
     .function ("wheel(delta, horizontal, x, y, buttons)", &View::wheel)
     .function ("key(key, buttons)", &View::key)
     .function ("zoomFit", &View::zoom_fit)
+    // Frames come out at ratio times the CSS size given to resize; mouse
+    // input stays in CSS pixels. One ratio per module instance.
+    .function ("setDevicePixelRatio(ratio)", &View::set_device_pixel_ratio)
+    .function ("configure(config)", &View::configure)
+    .function ("viewport", &View::viewport)
+    .function ("zoomBox(box)", &View::zoom_box)
+    // The layout point under a CSS pixel.
+    .function ("pointAt(x, y)", &View::point_at)
+    .function ("showCell(name)", &View::show_cell)
+    .function ("currentCell", &View::current_cell)
     .function ("modes", &View::modes)
     .function ("mode", &View::mode)
     .function ("switchMode(mode)", &View::switch_mode)
