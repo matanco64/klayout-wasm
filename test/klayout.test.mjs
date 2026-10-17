@@ -283,6 +283,30 @@ assert.throws(() => hd.showCell("NOPE"), /no cell named NOPE/);
 hd.showCell(top);
 assert.equal(new k.View(true).currentCell(), null, "no layout, no cell");
 console.log(`showCell: ${child}, then back to ${top}`);
+
+// A technology's layer the layout does not have yet can be drawn on.
+const empty = new k.View(true);
+empty.resize(400, 300);
+empty.open(gds);
+empty.loadLayerProperties(new TextEncoder().encode(`<?xml version="1.0" encoding="utf-8"?>
+<layer-properties><properties><name>Metal1</name><source>34/0@1</source><visible>true</visible></properties></layer-properties>`));
+const metal1 = empty.layerPanel().find((e) => e.label.startsWith("Metal1"));
+assert.deepEqual([metal1.layer, metal1.present], [{ layer: 34, datatype: 0 }, false]);
+assert.equal(empty.setCurrentLayer(metal1.layer), true, "a layer only the .lyp names can be current");
+// Drawn with KLayout's box tool, which creates the layer.
+empty.zoomBox({ left: 0, bottom: 0, right: 400, top: 300 });
+empty.switchMode("box");
+empty.mouse("enter", 0, 0, NONE);
+for (const [x, y] of [[100, 200], [200, 100]]) {
+  empty.mouse("move", x, y, NONE);
+  empty.mouse("press", x, y, LEFT);
+  empty.mouse("release", x, y, LEFT);
+}
+assert.equal(empty.shapes(empty.currentCell(), metal1.layer).length, 1, "the box is on 34/0");
+empty.frame();  // the panel picks up new layers when the view next updates
+assert.equal(empty.layerPanel().find((e) => e.label.startsWith("Metal1")).present, true);
+empty.delete();
+console.log("layer panel: an absent .lyp layer is drawable and becomes present");
 hd.delete();
 console.log("ok");
 

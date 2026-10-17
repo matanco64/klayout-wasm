@@ -637,7 +637,18 @@ LayerEntryList View::layer_panel ()
       int cvi = i->cellview_index ();
       bool has_layer = li >= 0 && cvi >= 0 && cvi < int (m_view->cellviews ()) &&
                        m_view->cellview (cvi)->layout ().is_valid_layer ((unsigned int) li);
-      o.set ("layer", has_layer ? from_layer (m_view->cellview (cvi)->layout ().get_properties ((unsigned int) li)) : val::null ());
+      // The layer the entry draws: the layout's, or else the one its source
+      // names, so a technology's layers can be drawn on before the layout has
+      // them. Null for wildcard and group entries.
+      const lay::ParsedLayerSource &src = i->source (true);
+      if (has_layer) {
+        o.set ("layer", from_layer (m_view->cellview (cvi)->layout ().get_properties ((unsigned int) li)));
+      } else if (! i->has_children () && src.layer () >= 0 && src.datatype () >= 0) {
+        o.set ("layer", from_layer (db::LayerProperties (src.layer (), src.datatype ())));
+      } else {
+        o.set ("layer", val::null ());
+      }
+      o.set ("present", has_layer);
       o.set ("visible", i->visible (false));
       o.set ("fill", color (i->eff_fill_color (true)));
       o.set ("frame", color (i->eff_frame_color (true)));

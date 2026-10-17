@@ -69,8 +69,10 @@ EMSCRIPTEN_BINDINGS (klayout)
   register_type<Selected> ("Selected", "{ kind: 'shape'; cell: string; layer: LayerSpec; shape: Shape } | "
                                        "{ kind: 'instance'; cell: string; instance: Instance }");
   // id: valid until the panel changes. label: what the panel shows. source: e.g. '1/0@1'.
+  // layer: what the entry draws, null for groups and wildcards. present: the
+  // layout has that layer (drawing on one it lacks creates it).
   register_type<LayerEntry> ("LayerEntry", "{ id: number; parent: number | null; group: boolean; label: string; "
-                                           "source: string; layer: LayerSpec | null; visible: boolean; "
+                                           "source: string; layer: LayerSpec | null; present: boolean; visible: boolean; "
                                            "fill: string; frame: string }");
   register_type<History> ("History", "{ undo: string | null; redo: string | null }");
   register_type<Change> ("Change", "{ type: 'layoutChanged'; history: History } | { type: 'selectionChanged' } | "
