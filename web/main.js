@@ -68,6 +68,8 @@ const at = (e) => { const r = canvas.getBoundingClientRect(); return [e.clientX 
 function resize() {
   const r = canvas.getBoundingClientRect();
   view.resize(Math.max(1, Math.floor(r.width)), Math.max(1, Math.floor(r.height)));
+  // Frames come out in device pixels; the canvas keeps its CSS size.
+  view.setDevicePixelRatio(devicePixelRatio);
   paint();
 }
 

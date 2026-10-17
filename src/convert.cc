@@ -199,6 +199,12 @@ val from_box (const db::Box &b)
   return o;
 }
 
+db::Box to_box (const val &v)
+{
+  return db::Box (to_i32 (field (v, "left"), "left"), to_i32 (field (v, "bottom"), "bottom"),
+                  to_i32 (field (v, "right"), "right"), to_i32 (field (v, "top"), "top"));
+}
+
 val from_shape (const db::Shape &s)
 {
   val o = val::object ();
@@ -255,8 +261,7 @@ db::Shape insert_shape (const val &v, db::Shapes &target)
 {
   std::string kind = to_string (field (v, "kind"), "kind");
   if (kind == "box") {
-    return target.insert (db::Box (to_i32 (field (v, "left"), "left"), to_i32 (field (v, "bottom"), "bottom"),
-                                   to_i32 (field (v, "right"), "right"), to_i32 (field (v, "top"), "top")));
+    return target.insert (to_box (v));
   } else if (kind == "polygon") {
     db::Polygon p;
     std::vector<db::Point> hull = to_points (field (v, "hull"), "hull");
