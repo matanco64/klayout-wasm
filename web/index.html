@@ -3,7 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>klayout-wasm demo</title>
+  <title>klayout-wasm: KLayout in the browser</title>
+  <meta name="description" content="KLayout's layout viewer and editor compiled to WebAssembly. Open a GDS or OASIS file and edit it in the browser; nothing is uploaded.">
   <style>
     :root { color-scheme: light dark; --bg: #f4f4f5; --fg: #18181b; --muted: #71717a; --line: #d4d4d8; }
     @media (prefers-color-scheme: dark) { :root { --bg: #18181b; --fg: #f4f4f5; --muted: #a1a1aa; --line: #3f3f46; } }
@@ -13,7 +14,10 @@
     footer { border-top: 1px solid var(--line); border-bottom: 0; color: var(--muted); }
     button, input, label { font: inherit; }
     button[aria-pressed="true"] { font-weight: 600; outline: 2px solid currentColor; }
+    footer { justify-content: space-between; }
+    footer a { color: inherit; }
     #stage { position: relative; min-height: 0; }
+    #stage[data-loading]::after { content: attr(data-loading); position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); }
     canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; outline: none; cursor: crosshair; }
   </style>
 </head>
@@ -30,7 +34,7 @@
     <button data-command="delete">Delete</button>
     <button id="fit">Fit</button>
   </header>
-  <div id="stage"><canvas id="canvas" tabindex="0"></canvas></div>
+  <div id="stage" data-loading="Loading KLayout…"><canvas id="canvas" tabindex="0"></canvas></div>
   <footer id="status">Loading KLayoutâ€¦</footer>
   <script type="module" src="./main.js"></script>
 </body>

@@ -9,8 +9,17 @@ const canvas = $("canvas");
 const ctx = canvas.getContext("2d");
 const status = (text) => ($("status").textContent = text);
 
+// Native WebAssembly exceptions are the one feature an older browser lacks;
+// say so rather than failing inside the module.
+const EXCEPTIONS = new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 1, 4, 1, 96, 0, 0, 3, 2, 1, 0, 10, 7, 1, 5, 0, 6, 64, 11, 11]);
+if (!WebAssembly.validate(EXCEPTIONS)) {
+  $("stage").dataset.loading = "This browser does not support WebAssembly exceptions. Use a current Chrome, Edge, Firefox or Safari.";
+  throw new Error("no WebAssembly exception support");
+}
+
 const k = await createKlayout();
 const view = new k.View(true);
+$("version").textContent = ` ${k.klayoutVersion}`;
 let selected = 0;
 
 // Reflects what changed since the last look, whoever changed it.
@@ -155,5 +164,6 @@ new ResizeObserver(resize).observe(canvas);
 
 resize();
 open(new Uint8Array(await (await fetch("./ringo.gds")).arrayBuffer()));
+delete $("stage").dataset.loading;
 react();
 paint();

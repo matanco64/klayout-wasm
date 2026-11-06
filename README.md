@@ -117,6 +117,29 @@ A clean build compiles 440 KLayout translation units and takes about two
 and a half minutes on a 16-core machine. CMake writes
 `build/compile_commands.json`; `.clangd` points editors at it.
 
+## Deploying the demo
+
+`tools/make_site.sh` assembles `site/`: the page, the module, a sample
+layout, the license, and precompressed `.br`/`.gz` copies. Copy it to any
+static file server. No special headers are needed (no SharedArrayBuffer, no
+cross-origin isolation, no `eval`), but serve the precompressed files rather
+than compressing 28 MB per request. Caddy, under a path prefix:
+
+```caddy
+redir /klayout-wasm /klayout-wasm/
+handle_path /klayout-wasm/* {
+	root * /var/www/klayout-wasm
+	file_server {
+		precompressed br gzip
+	}
+}
+```
+
+The page links to this repository and its license. Keep that link working
+wherever it is hosted: the module is a combined work with KLayout, and the
+GPL requires the corresponding source to be available to anyone the binary
+is served to.
+
 ## How the build works
 
 - **Source lists come from KLayout's own `.pro` files.**
