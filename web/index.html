@@ -34,8 +34,11 @@
     <button data-command="delete">Delete</button>
     <button id="fit">Fit</button>
   </header>
-  <div id="stage" data-loading="Loading KLayout�"><canvas id="canvas" tabindex="0"></canvas></div>
-  <footer id="status">Loading KLayout…</footer>
+  <div id="stage" data-loading="Loading KLayout…"><canvas id="canvas" tabindex="0"></canvas></div>
+  <footer>
+    <span id="status">Loading KLayout…</span>
+    <span>Files stay in your browser. Unofficial build of <a href="https://www.klayout.de">KLayout</a><span id="version"></span>, not affiliated with the KLayout project · <a href="https://github.com/matanco64/klayout-wasm">source</a> · <a href="./LICENSE.txt">GPL-3.0</a></span>
+  </footer>
   <script type="module" src="./main.js"></script>
 </body>
 </html>
