@@ -8,6 +8,12 @@ This is an **unofficial** build. It is not affiliated with or endorsed by the
 KLayout project. KLayout's own source is used unmodified as a git submodule;
 the two edits Emscripten needs are applied to copies at build time.
 
+![The klayout-wasm demo page showing KLayout's ringo.gds sample, a ring oscillator, with KLayout's edit modes in the toolbar](docs/demo.png)
+
+*The demo page (`web/`): KLayout's `ringo.gds` sample rendered and editable in
+the browser. Open your own GDS or OASIS file with **Layout**; it never leaves
+the browser.*
+
 ## Status
 
 | Phase | Scope | State |
