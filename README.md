@@ -8,6 +8,13 @@ This is an **unofficial** build. It is not affiliated with or endorsed by the
 KLayout project. KLayout's own source is used unmodified as a git submodule;
 the two edits Emscripten needs are applied to copies at build time.
 
+![A synthetic two-inverter cell drawn by klayout-wasm in laysync's live browser viewer, with a pending review's highlights](docs/laysync-viewer.png)
+
+*klayout-wasm drawing a live cell in [laysync](https://github.com/matanco64/laysync)'s
+browser viewer: a made-up two-inverter cell on generic layers (no PDK data),
+with a pending merge review's highlights. The page reloads in place when an
+agent commits to the cell.*
+
 ## Status
 
 | Phase | Scope | State |
