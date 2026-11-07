@@ -47,8 +47,20 @@ click).
 
 ## Using it
 
+```sh
+npm install klayout-wasm
+```
+
+The package holds `klayout.js` (an ES module), `klayout.wasm` and the
+TypeScript types; it runs in browsers, web workers and Node 22+. `klayout.js`
+finds `klayout.wasm` next to itself through `import.meta.url`, which Vite,
+webpack 5 and esbuild follow. Elsewhere, pass
+`createKlayout({ locateFile: () => wasmUrl })`. The module is ~28 MB raw and
+~6 MB compressed: serve it compressed. It is GPL-licensed, and so is anything
+that bundles it (see [License](#license)).
+
 ```js
-import createKlayout from "./klayout.js";
+import createKlayout from "klayout-wasm";
 
 const k = await createKlayout();
 const view = new k.View(true);                     // editable
@@ -67,7 +79,7 @@ view.delete();                                     // Embind objects are freed e
 ```
 
 The build emits `klayout.d.ts`, generated from `src/bindings.cc`, with every
-method and value type. Coordinates are integer database units (`view.dbu()`
+method and value type; the npm package ships it. Coordinates are integer database units (`view.dbu()`
 micrometers each).
 
 | Area | Methods |
@@ -151,6 +163,25 @@ The page links to this repository and its license. Keep that link working
 wherever it is hosted: the module is a combined work with KLayout, and the
 GPL requires the corresponding source to be available to anyone the binary
 is served to.
+
+## Releasing to npm
+
+`.github/workflows/npm.yml` builds and tests the module on every pull
+request, packs it, and runs `test/package/run.sh`, which installs the packed
+tarball into a scratch project, type-checks `test/package/consumer.ts`
+against the shipped types and runs it. To release, set `version` in
+`package.json`, merge, then push a matching tag:
+
+```sh
+git tag v0.1.0 && git push origin v0.1.0
+```
+
+The workflow publishes with npm trusted publishing: on npmjs.com, the
+package's settings name this repository and `npm.yml` as its publisher, and
+no token is stored. npm only offers that setting for a package that exists,
+so the first version is published by hand from the tarball the workflow
+built (the `npm-package` artifact of the tag's run):
+`npm publish klayout-wasm-0.1.0.tgz --access public`.
 
 ## How the build works
 

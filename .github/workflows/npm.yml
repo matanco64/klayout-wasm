@@ -1,0 +1,80 @@
+# Builds the module, checks the npm package a consumer would install, and on a
+# version tag (v0.1.0, ...) publishes it to npm. Publishing uses npm trusted
+# publishing (OIDC): no token is stored, and npm records which workflow run
+# built each version. Like the Pages build, the published klayout.wasm is
+# built here from the tagged sources, never uploaded from a workstation.
+name: npm
+
+on:
+  push:
+    tags: ['v*']
+  pull_request:          # build, test and pack only
+  workflow_dispatch:     # same, for any branch
+
+permissions:
+  contents: read
+  id-token: write        # trusted publishing; used only on tags
+
+concurrency:
+  group: npm-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  EMSDK_VERSION: 6.0.12   # README "Requirements"
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Ninja
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      - name: Emscripten cache
+        uses: actions/cache@v4
+        with:
+          path: ~/emsdk
+          key: emsdk-${{ env.EMSDK_VERSION }}-${{ runner.os }}
+
+      - name: Emscripten
+        run: |
+          [ -d ~/emsdk ] || git clone --depth 1 https://github.com/emscripten-core/emsdk.git ~/emsdk
+          ~/emsdk/emsdk install "$EMSDK_VERSION"
+          ~/emsdk/emsdk activate "$EMSDK_VERSION"
+
+      - name: Build
+        run: |
+          source ~/emsdk/emsdk_env.sh
+          emcmake cmake -B build -G Ninja
+          cmake --build build
+
+      - name: Test
+        run: node test/klayout.test.mjs
+
+      - name: Test the package as installed
+        run: test/package/run.sh
+
+      - name: Pack
+        run: npm pack
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npm-package
+          path: klayout-wasm-*.tgz
+
+      - name: Publish
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          version=$(node -p "require('./package.json').version")
+          [ "$GITHUB_REF_NAME" = "v$version" ] || {
+            echo "tag $GITHUB_REF_NAME does not match package.json version $version" >&2; exit 1; }
+          npm install -g npm@latest      # trusted publishing needs npm 11.5.1+
+          npm publish klayout-wasm-"$version".tgz --access public

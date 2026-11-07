@@ -1,0 +1,37 @@
+{
+  "name": "klayout-wasm",
+  "version": "0.1.0",
+  "description": "KLayout's layout view, editing tools and GDS/OASIS reader and writer, compiled to WebAssembly, with TypeScript types",
+  "keywords": ["klayout", "gds", "gdsii", "oasis", "layout", "eda", "vlsi", "webassembly", "wasm"],
+  "homepage": "https://matanco64.github.io/klayout-wasm/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/matanco64/klayout-wasm.git"
+  },
+  "bugs": "https://github.com/matanco64/klayout-wasm/issues",
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "main": "./build/klayout.js",
+  "types": "./build/klayout.d.ts",
+  "exports": {
+    ".": {
+      "types": "./build/klayout.d.ts",
+      "default": "./build/klayout.js"
+    },
+    "./klayout.wasm": "./build/klayout.wasm",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "build/klayout.js",
+    "build/klayout.wasm",
+    "build/klayout.d.ts"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "prepack": "node -e \"for (const f of ['js','wasm','d.ts']) require('fs').statSync('build/klayout.'+f)\"",
+    "test": "node test/klayout.test.mjs"
+  }
+}
