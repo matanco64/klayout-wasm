@@ -4,6 +4,9 @@
 WebAssembly, with a typed JavaScript API, for building layout viewers and
 editors that run in a browser or a VS Code webview.
 
+**Try it: <https://matanco64.github.io/klayout-wasm/>**, the demo page below,
+built from `master`.
+
 This is an **unofficial** build. It is not affiliated with or endorsed by the
 KLayout project. KLayout's own source is used unmodified as a git submodule;
 the two edits Emscripten needs are applied to copies at build time.
@@ -124,6 +127,9 @@ and a half minutes on a 16-core machine. CMake writes
 `build/compile_commands.json`; `.clangd` points editors at it.
 
 ## Deploying the demo
+
+`.github/workflows/pages.yml` builds the module from each push to `master`,
+runs the tests and publishes the page to GitHub Pages. To host it elsewhere:
 
 `tools/make_site.sh` assembles `site/`: the page, the module, a sample
 layout, the license, and precompressed `.br`/`.gz` copies. Copy it to any

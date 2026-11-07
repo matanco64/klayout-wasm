@@ -1,0 +1,78 @@
+# Builds the module from this commit's sources and publishes the demo page
+# to GitHub Pages. Building here, rather than uploading a binary, keeps the
+# served klayout.wasm matched to the source the page links to (GPL).
+name: Pages
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+env:
+  EMSDK_VERSION: 6.0.12   # README "Requirements"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Ninja
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      - name: Emscripten cache
+        uses: actions/cache@v4
+        with:
+          path: ~/emsdk
+          key: emsdk-${{ env.EMSDK_VERSION }}-${{ runner.os }}
+
+      - name: Emscripten
+        run: |
+          [ -d ~/emsdk ] || git clone --depth 1 https://github.com/emscripten-core/emsdk.git ~/emsdk
+          ~/emsdk/emsdk install "$EMSDK_VERSION"
+          ~/emsdk/emsdk activate "$EMSDK_VERSION"
+
+      - name: Build
+        run: |
+          source ~/emsdk/emsdk_env.sh
+          emcmake cmake -B build -G Ninja
+          cmake --build build
+
+      - name: Test
+        run: node test/klayout.test.mjs
+
+      - name: Assemble site
+        run: |
+          tools/make_site.sh build site
+          # Pages compresses on its own; the precompressed copies are for
+          # self-hosting with Caddy or nginx.
+          find site -name '*.gz' -delete -o -name '*.br' -delete
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
