@@ -26,6 +26,7 @@ EMSCRIPTEN_DECLARE_VAL_TYPE (Edit)
 EMSCRIPTEN_DECLARE_VAL_TYPE (Selected)
 EMSCRIPTEN_DECLARE_VAL_TYPE (LayerEntry)
 EMSCRIPTEN_DECLARE_VAL_TYPE (Change)
+EMSCRIPTEN_DECLARE_VAL_TYPE (Marker)
 }
 
 EMSCRIPTEN_BINDINGS (klayout)
@@ -95,6 +96,13 @@ EMSCRIPTEN_BINDINGS (klayout)
   register_type<LayerEntryList> ("LayerEntry[]");
   register_type<ChangeList> ("Change[]");
   register_type<StringList> ("string[]");
+  // A marker outlines a shape over the layout, in DBU of the layout shown.
+  // color: outline and fill, default red; frameColor: the outline only;
+  // lineWidth and vertexSize in pixels; ditherPattern: a stipple index;
+  // halo: draw a contrasting border.
+  register_type<Marker> ("Marker", "{ shape: Shape; color?: string; frameColor?: string; lineWidth?: number; "
+                                   "vertexSize?: number; ditherPattern?: number; halo?: boolean }");
+  register_type<MarkerList> ("Marker[]");
   register_type<LayoutSummary> ("LayoutSummary", "{ format: string; dbu: number; cells: number; topCells: number; layers: number; shapes: number }");
 
   // Display and editing settings; each field is optional and only the ones
@@ -154,5 +162,11 @@ EMSCRIPTEN_BINDINGS (klayout)
     .function ("loadLayerProperties(lyp)", &View::load_layer_properties)
     .function ("saveLayerProperties", &View::save_layer_properties)
     // What changed since the last call, by any route.
-    .function ("changes", &View::changes);
+    .function ("changes", &View::changes)
+    // Markers: outlines over the layout, e.g. DRC results. setMarkers
+    // replaces all of them and returns how many it drew; a bad entry
+    // throws and leaves the old ones. Loading a layout clears them.
+    .function ("setMarkers(markers)", &View::set_markers)
+    .function ("clearMarkers", &View::clear_markers)
+    .function ("markerCount", &View::marker_count);
 }
