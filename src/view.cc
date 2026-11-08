@@ -12,6 +12,7 @@
 #include "edtService.h"
 #include "layLayerProperties.h"
 #include "layLayoutCanvas.h"
+#include "tlColor.h"
 #include "tlPixelBuffer.h"
 #include "tlStream.h"
 
@@ -118,6 +119,8 @@ void View::open (const Bytes &bytes)
 {
   guarded ([&] {
     write_file (layout_path, to_bytes (bytes));
+    // Markers are in the old layout's coordinates.
+    m_markers.clear ();
     m_view->load_layout (layout_path, false);
     m_view->max_hier ();
     m_view->zoom_fit ();
@@ -750,6 +753,102 @@ ChangeList View::changes ()
     m_opened = false;
     return ChangeList (a);
   });
+}
+
+// -- Markers ------------------------------------------------------------------
+
+static tl::Color marker_color (const val &m, const char *name)
+{
+  std::string c = to_string (m[name], name);
+  if (c.size () != 7 || c[0] != '#' || c.find_first_not_of ("0123456789abcdefABCDEF", 1) != std::string::npos) {
+    throw tl::Exception (std::string (name) + ": expected \"#rrggbb\"");
+  }
+  return tl::Color (c);
+}
+
+unsigned int View::set_markers (const MarkerList &markers)
+{
+  return guarded ([&] {
+    if (! markers.isArray ()) {
+      throw tl::Exception ("markers: expected an array");
+    }
+    double dbu = layout ().dbu ();
+    db::CplxTrans to_um (dbu);
+    unsigned int n = markers["length"].as<unsigned int> ();
+
+    // Build all of them first: a bad entry replaces nothing.
+    std::vector<std::unique_ptr<lay::DMarker>> built;
+    built.reserve (n);
+    db::Shapes scratch (false);
+    for (unsigned int i = 0; i < n; ++i) {
+      val m = markers[i];
+      std::string at = "markers[" + std::to_string (i) + "].";
+      try {
+        if (m.isNull () || m.typeOf ().as<std::string> () != "object") {
+          throw tl::Exception ("expected an object");
+        }
+        db::Shape s = insert_shape (field (m, "shape"), scratch);
+        std::unique_ptr<lay::DMarker> marker (new lay::DMarker (m_view.get ()));
+        if (s.is_box ()) {
+          marker->set (db::DBox (s.box ().transformed (to_um)));
+        } else if (s.is_polygon ()) {
+          db::Polygon p;
+          s.polygon (p);
+          marker->set (p.transformed (to_um));
+        } else if (s.is_path ()) {
+          db::Path p;
+          s.path (p);
+          marker->set (p.transformed (to_um));
+        } else if (s.is_text ()) {
+          db::Text t;
+          s.text (t);
+          marker->set (t.transformed (to_um));
+        } else if (s.is_edge ()) {
+          marker->set (s.edge ().transformed (to_um));
+        } else if (s.is_edge_pair ()) {
+          marker->set (s.edge_pair ().transformed (to_um));
+        } else if (s.is_point ()) {
+          db::DPoint p = to_um * s.point ();
+          marker->set (db::DBox (p, p));
+          marker->set_vertex_size (5);
+        } else {
+          throw tl::Exception ("shape: unsupported kind");
+        }
+        marker->set_color (has (m, "color") ? marker_color (m, "color") : tl::Color (0xffff0000));
+        if (has (m, "frameColor")) {
+          marker->set_frame_color (marker_color (m, "frameColor"));
+        }
+        if (has (m, "lineWidth")) {
+          marker->set_line_width (to_i32 (m["lineWidth"], "lineWidth"));
+        }
+        if (has (m, "vertexSize")) {
+          marker->set_vertex_size (to_i32 (m["vertexSize"], "vertexSize"));
+        }
+        if (has (m, "ditherPattern")) {
+          marker->set_dither_pattern (to_i32 (m["ditherPattern"], "ditherPattern"));
+        }
+        if (has (m, "halo")) {
+          marker->set_halo (to_bool (m["halo"], "halo") ? 1 : 0);
+        }
+        built.push_back (std::move (marker));
+      } catch (tl::Exception &ex) {
+        throw tl::Exception (at + ex.msg ());
+      }
+      scratch.clear ();
+    }
+    m_markers = std::move (built);
+    return (unsigned int) m_markers.size ();
+  });
+}
+
+void View::clear_markers ()
+{
+  guarded ([&] { m_markers.clear (); });
+}
+
+unsigned int View::marker_count ()
+{
+  return (unsigned int) m_markers.size ();
 }
 
 LayoutSummary inspect (const Bytes &bytes)

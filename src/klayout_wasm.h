@@ -15,6 +15,7 @@
 #include "dbShapes.h"
 #include "dbManager.h"
 #include "layLayoutView.h"
+#include "layMarker.h"
 #include "tlException.h"
 #include "tlObject.h"
 
@@ -54,6 +55,7 @@ EMSCRIPTEN_DECLARE_VAL_TYPE (Point)
 EMSCRIPTEN_DECLARE_VAL_TYPE (Rect)
 EMSCRIPTEN_DECLARE_VAL_TYPE (ViewConfig)
 EMSCRIPTEN_DECLARE_VAL_TYPE (OptionalString)
+EMSCRIPTEN_DECLARE_VAL_TYPE (MarkerList)
 
 // Runs f, turning a C++ exception into a JavaScript Error. Every function
 // JavaScript can call goes through here.
@@ -148,6 +150,12 @@ public:
 
   ChangeList changes ();
 
+  // Markers: outlines drawn over the layout (KLayout's lay::DMarker, what its
+  // marker browser shows), not part of the layout and not undoable.
+  unsigned int set_markers (const MarkerList &markers);
+  void clear_markers ();
+  unsigned int marker_count ();
+
 private:
   struct State
   {
@@ -175,6 +183,8 @@ private:
   unsigned int m_width = 0, m_height = 0;
   State m_seen;
   bool m_opened = false;
+  // Declared after the view, so they are destroyed before it.
+  std::vector<std::unique_ptr<lay::DMarker>> m_markers;
 };
 
 // Reads GDS2 or OASIS into a standalone layout and summarizes it.

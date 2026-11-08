@@ -86,6 +86,47 @@ view.redo();
 view.command("cancel");
 view.changes();
 
+// Markers: overlays for check results, drawn in frames, never part of the layout.
+const pixels = (a, b) => {
+  let n = 0;
+  for (let i = 0; i < a.length; i += 4) if (a[i] !== b[i] || a[i + 1] !== b[i + 1] || a[i + 2] !== b[i + 2]) n++;
+  return n;
+};
+view.zoomFit();
+const plain = Uint8Array.from(view.frame().rgba);
+const bb = cells.find((c) => c.top).bbox;
+const cx = Math.round((bb.left + bb.right) / 2), cy = Math.round((bb.bottom + bb.top) / 2);
+const w = Math.round((bb.right - bb.left) / 8);
+const markers = [
+  { shape: { kind: "box", left: cx - w, bottom: cy - w, right: cx + w, top: cy + w }, color: "#00ff00", ditherPattern: 0 },
+  { shape: { kind: "polygon", hull: [{ x: bb.left, y: bb.bottom }, { x: bb.left + w, y: bb.bottom }, { x: bb.left, y: bb.bottom + w }] } },
+  { shape: { kind: "point", x: cx, y: cy }, vertexSize: 9 },
+];
+const shapesBefore = view.shapes(top, { layer: 1, datatype: 0 }).length;
+assert.equal(view.setMarkers(markers), 3);
+assert.equal(view.markerCount(), 3);
+const marked = view.frame().rgba;
+const byMarkers = pixels(marked, plain);
+console.log(`markers: ${byMarkers} pixels changed by 3 markers`);
+assert.ok(byMarkers > 500);
+assert.equal(view.shapes(top, { layer: 1, datatype: 0 }).length, shapesBefore, "markers are not shapes");
+assert.equal(view.history().undo, "Create box", "markers are not edits");
+assert.throws(() => view.setMarkers([markers[0], { shape: { kind: "box", left: 0, bottom: 0, right: 1, top: 1 }, color: "red" }]), /markers\[1\].*color/);
+assert.throws(() => view.setMarkers([42]), /markers\[0\]/);
+assert.equal(view.markerCount(), 3, "a rejected list keeps the old markers");
+assert.equal(view.setMarkers([markers[0]]), 1);
+view.clearMarkers();
+assert.equal(view.markerCount(), 0);
+assert.equal(pixels(view.frame().rgba, plain), 0, "cleared markers leave the frame as it was");
+const other = new k.View(true);
+other.resize(200, 150);
+other.open(ringo);
+other.setMarkers(markers);
+other.open(ringo);
+assert.equal(other.markerCount(), 0, "opening a layout drops the markers");
+other.delete();
+console.log("markers: drawn, validated, replaced, cleared, dropped on open");
+
 // One edit with every shape kind, a new cell, a new layer and instances.
 const cell = "API_TEST";
 const layer = { layer: 200, datatype: 0 };

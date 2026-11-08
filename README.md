@@ -93,6 +93,7 @@ micrometers each).
 | Edit menu | `command(...)`: delete, cut, copy, paste, pasteMove, selectAll, unselectAll, cancel |
 | History | `undo`, `redo`, `history` (KLayout's undo/redo labels) |
 | Layer panel | `layerPanel`, `setLayerVisible`, `loadLayerProperties`, `saveLayerProperties` (.lyp) |
+| Markers | `setMarkers([{ shape, color, frameColor, lineWidth, vertexSize, ditherPattern, halo }])`: overlays in database units, e.g. check results; not shapes and not undo steps; a bad entry replaces nothing. `clearMarkers`, `markerCount`; `open` drops them |
 | Changes | `changes()`: what changed since the last call, whoever changed it, including KLayout's own tools reacting to input |
 
 Values are checked as they are read: a missing or mistyped field throws a
