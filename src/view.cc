@@ -851,15 +851,21 @@ unsigned int View::marker_count ()
   return (unsigned int) m_markers.size ();
 }
 
+std::string read_layout (const Bytes &bytes, db::Layout &layout)
+{
+  std::vector<uint8_t> data = to_bytes (bytes);
+  tl::InputMemoryStream memory (reinterpret_cast<const char *> (data.data ()), data.size ());
+  tl::InputStream stream (memory);
+  db::Reader reader (stream);
+  reader.read (layout);
+  return reader.format ();
+}
+
 LayoutSummary inspect (const Bytes &bytes)
 {
   return guarded ([&] {
-    std::vector<uint8_t> data = to_bytes (bytes);
     db::Layout layout (false);
-    tl::InputMemoryStream memory (reinterpret_cast<const char *> (data.data ()), data.size ());
-    tl::InputStream stream (memory);
-    db::Reader reader (stream);
-    reader.read (layout);
+    std::string format = read_layout (bytes, layout);
     size_t top = 0, layers = 0, shapes = 0;
     for (auto c = layout.begin_top_down (); c != layout.end_top_cells (); ++c) {
       ++top;
@@ -874,7 +880,7 @@ LayoutSummary inspect (const Bytes &bytes)
       }
     }
     val o = val::object ();
-    o.set ("format", reader.format ());
+    o.set ("format", format);
     o.set ("dbu", layout.dbu ());
     o.set ("cells", unsigned (cells));
     o.set ("topCells", unsigned (top));

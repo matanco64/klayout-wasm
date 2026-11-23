@@ -27,6 +27,9 @@ EMSCRIPTEN_DECLARE_VAL_TYPE (Selected)
 EMSCRIPTEN_DECLARE_VAL_TYPE (LayerEntry)
 EMSCRIPTEN_DECLARE_VAL_TYPE (Change)
 EMSCRIPTEN_DECLARE_VAL_TYPE (Marker)
+EMSCRIPTEN_DECLARE_VAL_TYPE (LayerDiff)
+EMSCRIPTEN_DECLARE_VAL_TYPE (CellDiff)
+EMSCRIPTEN_DECLARE_VAL_TYPE (LayerXor)
 }
 
 EMSCRIPTEN_BINDINGS (klayout)
@@ -115,7 +118,46 @@ EMSCRIPTEN_BINDINGS (klayout)
   register_type<OptionalString> ("OptionalString", "string | null");
   constant ("klayoutVersion", std::string (KLAYOUT_VERSION));
 
+  // Comparing two layout files, a (before) and b (after). Cells are matched
+  // by name and layers by layer/datatype; layers without both are skipped.
+  // properties: also compare user properties (the differing objects are
+  // reported; the properties themselves are not carried yet). tolerance: in
+  // DBU, for shapes; instances are compared exactly. boxesAsPolygons, pathsAsPolygons: compare by outline, so a box
+  // equals the same rectangle drawn as a polygon. expandArrays: compare
+  // instance arrays placement by placement. ignoreTextDetails: compare texts
+  // by string and position only (OASIS keeps no size, font or alignment). ignoreDuplicates: a shape or instance present twice equals
+  // one present once (KLayout's OASIS writer drops such duplicates).
+  register_type<DiffOptions> ("DiffOptions", "{ properties?: boolean; tolerance?: number; boxesAsPolygons?: boolean; "
+                                             "pathsAsPolygons?: boolean; expandArrays?: boolean; "
+                                             "ignoreTextDetails?: boolean; ignoreDuplicates?: boolean }");
+  // Shapes of one layer of one cell found in only one of the layouts, in
+  // that cell's coordinates. A changed shape appears once on each side.
+  // Shapes are reported as they were compared: with boxesAsPolygons or
+  // pathsAsPolygons as polygons, with ignoreTextDetails without the details.
+  register_type<LayerDiff> ("LayerDiff", "{ layer: LayerSpec; onlyInA: Shape[]; onlyInB: Shape[] }");
+  // Instance arrays are reported in the form KLayout compares them in, which
+  // can differ from View.instances: an axis with one placement has a zero
+  // vector, and a and b are ordered.
+  register_type<CellDiff> ("CellDiff", "{ cell: string; instancesOnlyInA: Instance[]; instancesOnlyInB: Instance[]; layers: LayerDiff[] }");
+  // cells: the cells both layouts have that differ. dbu: set when the
+  // database units differ; coordinates are then compared as DBU counts.
+  register_type<LayoutDiff> ("LayoutDiff", "{ identical: boolean; dbu: { a: number; b: number } | null; "
+                                           "layersOnlyInA: LayerSpec[]; layersOnlyInB: LayerSpec[]; "
+                                           "cellsOnlyInA: string[]; cellsOnlyInB: string[]; cells: CellDiff[] }");
+  // The cells to compare, with everything below them; each defaults to the
+  // layout's top cell and must be named when there are several.
+  register_type<XorOptions> ("XorOptions", "{ cellA?: string; cellB?: string }");
+  // Where the merged geometry of the layer differs, in the cells' coordinates.
+  register_type<LayerXor> ("LayerXor", "{ layer: LayerSpec; polygons: ({ kind: 'polygon' } & Polygon)[] }");
+  register_type<XorResult> ("LayerXor[]");
+
   function ("inspect(bytes)", &inspect);
+  // What differs as objects: cells, instances, shapes.
+  function ("diff(a, b, options)", &diff);
+  // What differs as drawn geometry, per layer, whatever the hierarchy and
+  // shape types that draw it. Texts are not geometry. Layers that agree
+  // are left out. Throws when the database units differ.
+  function ("xor(a, b, options)", &xor_layouts);
 
   class_<View> ("View")
     .constructor<bool> ()  // editable

@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>klayout-wasm: compare two layouts</title>
+  <meta name="description" content="Compare two GDS or OASIS files in the browser with KLayout compiled to WebAssembly: what was added, removed and changed, cell by cell. Nothing is uploaded.">
+  <style>
+    :root { color-scheme: light dark; --bg: #f4f4f5; --fg: #18181b; --muted: #71717a; --line: #d4d4d8; --removed: #dc2626; --added: #16a34a; --xor: #d97706; }
+    @media (prefers-color-scheme: dark) { :root { --bg: #18181b; --fg: #f4f4f5; --muted: #a1a1aa; --line: #3f3f46; --removed: #f87171; --added: #4ade80; --xor: #fbbf24; } }
+    html, body { height: 100%; margin: 0; background: var(--bg); color: var(--fg); font: 13px system-ui, sans-serif; }
+    body { display: grid; grid-template-rows: auto 1fr auto; }
+    header, footer { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+    footer { border-top: 1px solid var(--line); border-bottom: 0; color: var(--muted); justify-content: space-between; }
+    a { color: inherit; }
+    button, input, label, select { font: inherit; }
+    main { display: grid; grid-template-columns: minmax(180px, 240px) 1fr 1fr; min-height: 0; }
+    main[data-loading]::after { content: attr(data-loading); grid-column: 1 / -1; display: grid; place-items: center; color: var(--muted); }
+    main[data-loading] > * { display: none; }
+    nav { display: grid; grid-template-rows: auto 1fr auto; gap: 8px; padding: 8px; border-right: 1px solid var(--line); min-height: 0; }
+    nav select { width: 100%; min-height: 0; font-variant-numeric: tabular-nums; }
+    nav p { margin: 0; color: var(--muted); }
+    figure { position: relative; margin: 0; min-width: 0; min-height: 0; display: grid; grid-template-rows: auto 1fr; }
+    figure + figure { border-left: 1px solid var(--line); }
+    figcaption { padding: 4px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    figcaption b { font-weight: 600; }
+    #captionA b { color: var(--removed); }
+    #captionB b { color: var(--added); }
+    canvas { width: 100%; height: 100%; min-height: 0; display: block; outline: none; cursor: crosshair; }
+    @media (max-width: 720px) { main { grid-template-columns: 1fr; grid-template-rows: 140px 1fr 1fr; } nav { border-right: 0; border-bottom: 1px solid var(--line); } figure + figure { border-left: 0; border-top: 1px solid var(--line); } }
+  </style>
+</head>
+<body>
+  <header>
+    <label>Before <input id="fileA" type="file" accept=".gds,.gds2,.oas,.gds.gz"></label>
+    <label>After <input id="fileB" type="file" accept=".gds,.gds2,.oas,.gds.gz"></label>
+    <label><input id="xor" type="checkbox"> Geometry (XOR)</label>
+    <label title="Compare texts by string and position only; OASIS keeps no size, font or alignment"><input id="ignoreTextDetails" type="checkbox"> Ignore text details</label>
+    <label title="A shape or instance present twice equals one present once"><input id="ignoreDuplicates" type="checkbox"> Ignore duplicates</label>
+    <button id="fit">Fit</button>
+    <a href="./">Editor</a>
+  </header>
+  <main id="stage" data-loading="Loading KLayout…">
+    <nav>
+      <label for="cells">Cells that differ</label>
+      <select id="cells" size="12"></select>
+      <p id="summary"></p>
+    </nav>
+    <figure>
+      <figcaption id="captionA"></figcaption>
+      <canvas id="canvasA" tabindex="0"></canvas>
+    </figure>
+    <figure>
+      <figcaption id="captionB"></figcaption>
+      <canvas id="canvasB" tabindex="0"></canvas>
+    </figure>
+  </main>
+  <footer>
+    <span id="status">Loading KLayout…</span>
+    <span>Files stay in your browser. Unofficial build of <a href="https://www.klayout.de">KLayout</a><span id="version"></span>, not affiliated with the KLayout project · <a href="https://github.com/matanco64/klayout-wasm">source</a> · <a href="./LICENSE.txt">GPL-3.0</a></span>
+  </footer>
+  <script type="module" src="./compare.js"></script>
+</body>
+</html>

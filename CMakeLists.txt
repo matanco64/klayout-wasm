@@ -92,7 +92,7 @@ foreach (module ${KL_MODULES})
   list (APPEND KLAYOUT_OBJECTS $<TARGET_OBJECTS:kl_${module}>)
 endforeach ()
 
-add_executable (klayout src/bindings.cc src/convert.cc src/view.cc ${KLAYOUT_OBJECTS})
+add_executable (klayout src/bindings.cc src/convert.cc src/diff.cc src/view.cc ${KLAYOUT_OBJECTS})
 target_include_directories (klayout PRIVATE ${KLAYOUT_INCLUDES} src)
 target_compile_definitions (klayout PRIVATE HAVE_EXPAT KLAYOUT_VERSION="${KLAYOUT_VERSION}")
 target_compile_options (klayout PRIVATE -Wall -Wextra -Wno-unused-parameter)
