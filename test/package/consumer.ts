@@ -15,5 +15,11 @@ const names: string[] = view.cells().map((c) => c.name);
 const oasis: Uint8Array = view.export("oasis");
 view.delete();
 
+// The same layout as GDS2 and as OASIS: only what OASIS cannot hold differs.
+const same: boolean = k.diff(gds, oasis, { ignoreTextDetails: true, ignoreDuplicates: true }).identical;
+const changedCells: string[] = k.diff(gds, oasis, {}).cells.map((c) => c.cell);
+const regions: number = k.xor(gds, oasis, {}).reduce((n, l) => n + l.polygons.length, 0);
+if (!same || regions !== 0) throw new Error(`GDS2 and OASIS of one layout differ: ${changedCells.join(", ")}; ${regions} XOR regions`);
+
 if (names.length !== cells) throw new Error(`View.cells() has ${names.length}, inspect() says ${cells}`);
 console.log(`package: klayout-wasm on KLayout ${k.klayoutVersion}: ${summary.format}, ${cells} cells, OASIS export ${oasis.length} bytes`);

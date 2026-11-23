@@ -9,11 +9,15 @@
 
 #pragma once
 
+#include "dbEdgePair.h"
 #include "dbInstances.h"
 #include "dbLayout.h"
 #include "dbShape.h"
 #include "dbShapes.h"
 #include "dbManager.h"
+#include "dbPath.h"
+#include "dbPolygon.h"
+#include "dbText.h"
 #include "layLayoutView.h"
 #include "layMarker.h"
 #include "tlException.h"
@@ -56,6 +60,10 @@ EMSCRIPTEN_DECLARE_VAL_TYPE (Rect)
 EMSCRIPTEN_DECLARE_VAL_TYPE (ViewConfig)
 EMSCRIPTEN_DECLARE_VAL_TYPE (OptionalString)
 EMSCRIPTEN_DECLARE_VAL_TYPE (MarkerList)
+EMSCRIPTEN_DECLARE_VAL_TYPE (DiffOptions)
+EMSCRIPTEN_DECLARE_VAL_TYPE (LayoutDiff)
+EMSCRIPTEN_DECLARE_VAL_TYPE (XorOptions)
+EMSCRIPTEN_DECLARE_VAL_TYPE (XorResult)
 
 // Runs f, turning a C++ exception into a JavaScript Error. Every function
 // JavaScript can call goes through here.
@@ -79,6 +87,8 @@ auto guarded (F &&f) -> decltype (f ())
 // Reading fields of JavaScript objects, checked.
 val field (const val &object, const char *name);
 bool has (const val &object, const char *name);
+// An optional field: absent, undefined and null all mean "not given".
+bool given (const val &object, const char *name);
 int32_t to_i32 (const val &v, const char *what);
 double to_f64 (const val &v, const char *what);
 bool to_bool (const val &v, const char *what);
@@ -93,6 +103,12 @@ val from_box (const db::Box &b);
 db::Box to_box (const val &v);
 // Undefined for user objects, which have no portable form.
 val from_shape (const db::Shape &s);
+val from_shape (const db::Box &b);
+val from_shape (const db::Polygon &p);
+val from_shape (const db::Path &p);
+val from_shape (const db::Text &t);
+val from_shape (const db::Edge &e);
+val from_shape (const db::EdgePair &ep);
 db::Shape insert_shape (const val &v, db::Shapes &target);
 val from_instance (const db::Layout &layout, const db::CellInstArray &inst);
 db::CellInstArray to_instance (const val &v, const db::Layout &layout);
@@ -187,7 +203,15 @@ private:
   std::vector<std::unique_ptr<lay::DMarker>> m_markers;
 };
 
+// Reads GDS2 or OASIS into a standalone layout; returns the format's name.
+std::string read_layout (const Bytes &bytes, db::Layout &layout);
+
 // Reads GDS2 or OASIS into a standalone layout and summarizes it.
 LayoutSummary inspect (const Bytes &bytes);
+
+// diff.cc: two layout files compared without a view. diff reports objects
+// (KLayout's db::LayoutDiff); xor_layouts reports geometry (db::Region).
+LayoutDiff diff (const Bytes &a, const Bytes &b, const DiffOptions &options);
+XorResult xor_layouts (const Bytes &a, const Bytes &b, const XorOptions &options);
 
 }

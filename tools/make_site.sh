@@ -27,11 +27,12 @@ sample=$root/vendor/klayout/samples/lvs/ringo.gds
 
 rm -rf "$out"
 mkdir -p "$out"
-cp "$build/klayout.js" "$build/klayout.wasm" "$sample" "$root/web/index.html" "$root/web/main.js" "$out/"
+cp "$build/klayout.js" "$build/klayout.wasm" "$sample" "$root/web/index.html" "$root/web/main.js" \
+  "$root/web/compare.html" "$root/web/compare.js" "$out/"
 cp "$root/LICENSE" "$out/LICENSE.txt"
 
 # Precompressed copies. Brotli if present; gzip always.
-for f in klayout.wasm klayout.js main.js index.html ringo.gds; do
+for f in klayout.wasm klayout.js main.js index.html compare.js compare.html ringo.gds; do
   gzip -9 -k -n "$out/$f"
   if command -v brotli >/dev/null; then brotli -q 11 -k "$out/$f"; fi
 done

@@ -96,7 +96,8 @@ bool is_object (const val &v)
   return ! v.isNull () && v.typeOf ().as<std::string> () == "object";
 }
 
-// An optional field: absent, undefined and null all mean "not given".
+}
+
 bool given (const val &object, const char *name)
 {
   if (! has (object, name)) {
@@ -104,8 +105,6 @@ bool given (const val &object, const char *name)
   }
   val v = object[name];
   return ! v.isUndefined () && ! v.isNull ();
-}
-
 }
 
 val field (const val &object, const char *name)
@@ -205,56 +204,94 @@ db::Box to_box (const val &v)
                   to_i32 (field (v, "right"), "right"), to_i32 (field (v, "top"), "top"));
 }
 
-val from_shape (const db::Shape &s)
+val from_shape (const db::Box &b)
+{
+  val o = from_box (b);
+  o.set ("kind", "box");
+  return o;
+}
+
+val from_shape (const db::Polygon &p)
 {
   val o = val::object ();
+  o.set ("kind", "polygon");
+  o.set ("hull", from_points (p.begin_hull (), p.end_hull ()));
+  val holes = val::array ();
+  for (unsigned int h = 0; h < p.holes (); ++h) {
+    holes.call<void> ("push", from_points (p.begin_hole (h), p.end_hole (h)));
+  }
+  o.set ("holes", holes);
+  return o;
+}
+
+val from_shape (const db::Path &p)
+{
+  val o = val::object ();
+  o.set ("kind", "path");
+  o.set ("points", from_points (p.begin (), p.end ()));
+  o.set ("width", p.width ());
+  o.set ("beginExtension", p.bgn_ext ());
+  o.set ("endExtension", p.end_ext ());
+  o.set ("round", p.round ());
+  return o;
+}
+
+val from_shape (const db::Text &t)
+{
+  val o = val::object ();
+  o.set ("kind", "text");
+  o.set ("string", std::string (t.string ()));
+  o.set ("position", from_point (db::Point () + t.trans ().disp ()));
+  o.set ("orientation", orientations[t.trans ().fp_trans ().rot ()]);
+  o.set ("size", t.size ());
+  o.set ("font", t.font () >= 0 ? val (int (t.font ())) : val::null ());
+  o.set ("halign", t.halign () >= 0 && t.halign () <= 2 ? val (haligns[t.halign ()]) : val::null ());
+  o.set ("valign", t.valign () >= 0 && t.valign () <= 2 ? val (valigns[t.valign ()]) : val::null ());
+  return o;
+}
+
+val from_shape (const db::Edge &e)
+{
+  val o = from_edge (e);
+  o.set ("kind", "edge");
+  return o;
+}
+
+val from_shape (const db::EdgePair &ep)
+{
+  val o = val::object ();
+  o.set ("kind", "edgePair");
+  o.set ("first", from_edge (ep.first ()));
+  o.set ("second", from_edge (ep.second ()));
+  return o;
+}
+
+val from_shape (const db::Shape &s)
+{
   if (s.is_box ()) {
-    o = from_box (s.box ());
-    o.set ("kind", "box");
+    return from_shape (s.box ());
   } else if (s.is_polygon () || s.is_simple_polygon ()) {
     db::Polygon p;
     s.polygon (p);
-    o.set ("kind", "polygon");
-    o.set ("hull", from_points (p.begin_hull (), p.end_hull ()));
-    val holes = val::array ();
-    for (unsigned int h = 0; h < p.holes (); ++h) {
-      holes.call<void> ("push", from_points (p.begin_hole (h), p.end_hole (h)));
-    }
-    o.set ("holes", holes);
+    return from_shape (p);
   } else if (s.is_path ()) {
     db::Path p;
     s.path (p);
-    o.set ("kind", "path");
-    o.set ("points", from_points (p.begin (), p.end ()));
-    o.set ("width", p.width ());
-    o.set ("beginExtension", p.bgn_ext ());
-    o.set ("endExtension", p.end_ext ());
-    o.set ("round", p.round ());
+    return from_shape (p);
   } else if (s.is_text ()) {
     db::Text t;
     s.text (t);
-    o.set ("kind", "text");
-    o.set ("string", std::string (t.string ()));
-    o.set ("position", from_point (db::Point () + t.trans ().disp ()));
-    o.set ("orientation", orientations[t.trans ().fp_trans ().rot ()]);
-    o.set ("size", t.size ());
-    o.set ("font", t.font () >= 0 ? val (int (t.font ())) : val::null ());
-    o.set ("halign", t.halign () >= 0 && t.halign () <= 2 ? val (haligns[t.halign ()]) : val::null ());
-    o.set ("valign", t.valign () >= 0 && t.valign () <= 2 ? val (valigns[t.valign ()]) : val::null ());
+    return from_shape (t);
   } else if (s.is_edge ()) {
-    o = from_edge (s.edge ());
-    o.set ("kind", "edge");
+    return from_shape (s.edge ());
   } else if (s.is_edge_pair ()) {
-    o.set ("kind", "edgePair");
-    o.set ("first", from_edge (s.edge_pair ().first ()));
-    o.set ("second", from_edge (s.edge_pair ().second ()));
+    return from_shape (s.edge_pair ());
   } else if (s.is_point ()) {
-    o = from_point (s.point ());
+    val o = from_point (s.point ());
     o.set ("kind", "point");
-  } else {
-    return val::undefined ();
+    return o;
   }
-  return o;
+  return val::undefined ();
 }
 
 db::Shape insert_shape (const val &v, db::Shapes &target)

@@ -17,6 +17,11 @@ the two edits Emscripten needs are applied to copies at build time.
 the browser. Open your own GDS or OASIS file with **Layout**; it never leaves
 the browser.*
 
+**Compare two layouts: <https://matanco64.github.io/klayout-wasm/compare.html>**
+(`web/compare.html`). Two files side by side in views that pan and zoom
+together, the cells that differ listed, and what was removed and added in the
+chosen cell marked. `?a=<url>&b=<url>` loads the two files from URLs.
+
 ## Status
 
 | Phase | Scope | State |
@@ -85,6 +90,7 @@ micrometers each).
 | Area | Methods |
 |---|---|
 | Files | `open(bytes)`, `export("gds2" \| "oasis")`, `inspect(bytes)` (module function) |
+| Comparing | `diff(a, b, options)`, `xor(a, b, options)` (module functions on two files' bytes; see below) |
 | Input and rendering | `resize`, `setDevicePixelRatio` (HiDPI frames, CSS-pixel input), `mouse`, `wheel`, `key`, `frame`, `modes`, `mode`, `switchMode`, `setCurrentLayer` |
 | Viewport and cells | `zoomFit`, `zoomBox(rect)`, `viewport()`, `pointAt(x, y)` (layout point under a CSS pixel), `showCell(name)`, `currentCell()` |
 | Settings | `configure({ grid, editGrid, snapToObjects, gridVisible, background, connectAngle })`, through KLayout's own configuration keys |
@@ -102,15 +108,51 @@ value (`eraseShape` removes one equal shape). KLayout normalizes polygons
 (hull clockwise, holes counterclockwise), so a polygon reads back in that
 form.
 
+## Comparing layouts
+
+```js
+const d = k.diff(before, after, {});               // two files' bytes; no view needed
+d.identical;                                       // false
+d.cellsOnlyInB;                                    // ["ADDED"]
+d.cells;                                           // the cells in both that differ:
+// [{ cell: "RINGO",
+//    instancesOnlyInA: [{ cell: "INVX1", transform: {...}, array: null }], instancesOnlyInB: [],
+//    layers: [{ layer: { layer: 8, datatype: 0 }, onlyInA: [oldBox], onlyInB: [widerBox] }] }]
+
+view.showCell("RINGO");                            // shapes are in their cell's coordinates
+view.setMarkers(d.cells[0].layers.flatMap((l) => l.onlyInB).map((shape) => ({ shape, color: "#22c55e" })));
+
+k.xor(before, after, {});                          // [{ layer, polygons }] where the drawn geometry differs
+```
+
+`diff` compares objects with KLayout's own `db::LayoutDiff`, the engine
+behind its Diff tool and `strmcmp`: cells by name, layers by layer/datatype,
+then instances and shapes as sets. A changed shape is reported once on each
+side. It answers "what did someone edit". Options: `tolerance` (DBU),
+`boxesAsPolygons`, `pathsAsPolygons`, `expandArrays`, `ignoreTextDetails`,
+`ignoreDuplicates`, `properties`.
+
+`xor` compares merged geometry per layer with `db::Region`, for one cell and
+everything below it. It answers "would the mask change": moving a shape into
+a child cell, or widening one into metal that was already there, is a `diff`
+result and an empty `xor`. Texts are not geometry.
+
+Neither is byte comparison, and they are not sensitive to what makes two
+files of the same layout differ as bytes: shape order, timestamps, GDS2
+versus OASIS. Written out as OASIS, `ringo.gds` differs from itself only in
+what OASIS cannot hold (text size and alignment) and in two boxes the file
+has twice; with `ignoreTextDetails` and `ignoreDuplicates` it is identical.
+
 ## Layout
 
 ```
 CMakeLists.txt             the build
 tools/klayout_sources.py   reads KLayout's .pro files; applies the two patches
-src/                       view.cc (View), convert.cc (JS <-> KLayout values),
-                           bindings.cc (Embind and the TypeScript types)
+src/                       view.cc (View), diff.cc (diff, xor), convert.cc (JS <->
+                           KLayout values), bindings.cc (Embind and the TypeScript types)
 test/                      klayout.test.mjs: the whole API, headless
-web/                       minimal demo page: canvas, input forwarding, mode buttons
+web/                       minimal demo pages: the editor (index.html, main.js) and
+                           the comparison (compare.html, compare.js)
 vendor/klayout/            KLayout v0.30.12 (submodule, unmodified)
 vendor/libexpat/           Expat R_2_9_0 (submodule): KLayout's XML parser without Qt
 ```
@@ -213,6 +255,13 @@ built (the `npm-package` artifact of the tag's run):
   runs unchanged in a Web Worker, which is how silicon-studio hosts it.
 - Not carried through the API yet: user properties on shapes and instances
   (GDS properties), KLayout's PCells and libraries, and view-only markers.
+- `diff` matches cells by name, so a renamed cell is one cell removed and one
+  added; KLayout's smart cell mapping is not exposed. `tolerance` applies to
+  shapes, not instances. With `properties`, the
+  objects whose properties differ are reported, but not the properties. There
+  is no three-way comparison or merge yet.
+- `diff` and `xor` each parse both files on every call, and `xor` is flat:
+  fine for cells and blocks, untested on full-chip layouts.
 - KLayout's editor cannot select edges and edge pairs (DRC result types), so
   `selectAll` + `delete` leaves them, as on desktop.
 - `layoutChanged` comes from KLayout's undo journal, so a change made

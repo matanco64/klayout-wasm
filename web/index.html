@@ -15,7 +15,7 @@
     button, input, label { font: inherit; }
     button[aria-pressed="true"] { font-weight: 600; outline: 2px solid currentColor; }
     footer { justify-content: space-between; }
-    footer a { color: inherit; }
+    a { color: inherit; }
     #stage { position: relative; min-height: 0; }
     #stage[data-loading]::after { content: attr(data-loading); position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); }
     canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; outline: none; cursor: crosshair; }
@@ -33,6 +33,7 @@
     <button data-command="pasteMove">Paste</button>
     <button data-command="delete">Delete</button>
     <button id="fit">Fit</button>
+    <a href="./compare.html">Compare two layouts</a>
   </header>
   <div id="stage" data-loading="Loading KLayout…"><canvas id="canvas" tabindex="0"></canvas></div>
   <footer>

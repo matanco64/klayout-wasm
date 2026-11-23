@@ -361,6 +361,144 @@ assert.equal(empty.layerPanel().find((e) => e.label.startsWith("Metal1")).presen
 empty.delete();
 console.log("layer panel: an absent .lyp layer is drawable and becomes present");
 hd.delete();
+
+// Comparing two layout files. `variant` is ringo.gds with edits applied.
+function variant(edits, format = "gds2") {
+  const v = new k.View(true);
+  v.open(ringo);
+  if (edits.length) v.edit("variant", edits);
+  const bytes = v.export(format);
+  v.delete();
+  return bytes;
+}
+const SAME = { identical: true, dbu: null, layersOnlyInA: [], layersOnlyInB: [], cellsOnlyInA: [], cellsOnlyInB: [], cells: [] };
+assert.deepEqual(k.diff(ringo, ringo, {}), SAME);
+// Written as OASIS, ringo loses what OASIS cannot hold (text size and alignment)
+// and two boxes it has twice; nothing else.
+const asOasis = k.diff(ringo, variant([], "oasis"), {});
+assert.equal(asOasis.identical, false);
+const oasisOnly = asOasis.cells.flatMap((c) => c.layers).flatMap((l) => l.onlyInB);
+assert.ok(oasisOnly.length > 0 && oasisOnly.every((s) => s.kind === "text"));
+assert.deepEqual(k.diff(ringo, variant([], "oasis"), { ignoreTextDetails: true, ignoreDuplicates: true }), SAME);
+assert.deepEqual(k.xor(ringo, variant([], "oasis"), {}), []);
+
+const NEW_LAYER = { layer: 99, datatype: 0 };
+const newBox = { kind: "box", left: 0, bottom: 0, right: 1000, top: 500 };
+const [removed] = placed;
+const metal = layers.find((l) => view2Shapes(top, l).some((s) => s.kind === "box"));
+const [oldBox] = view2Shapes(top, metal).filter((s) => s.kind === "box");
+const movedBox = { ...oldBox, right: oldBox.right + 100 };
+function view2Shapes(cell, layer) {
+  const v = new k.View(false);
+  v.open(ringo);
+  const shapes = v.shapes(cell, layer);
+  v.delete();
+  return shapes;
+}
+const edited = variant([
+  { op: "insertShape", cell: top, layer: NEW_LAYER, shape: newBox },
+  { op: "eraseInstance", cell: top, instance: removed },
+  { op: "eraseShape", cell: top, layer: metal, shape: oldBox },
+  { op: "insertShape", cell: top, layer: metal, shape: movedBox },
+  { op: "createCell", name: "ADDED" },
+]);
+const d = k.diff(ringo, edited, {});
+const spec = ({ layer, datatype }) => ({ layer, datatype });
+assert.equal(d.identical, false);
+assert.deepEqual([d.cellsOnlyInA, d.cellsOnlyInB, d.layersOnlyInA, d.layersOnlyInB], [[], ["ADDED"], [], [NEW_LAYER]]);
+assert.deepEqual(d.cells.map((c) => c.cell), [top], "only the edited cell differs");
+const [cellDiff] = d.cells;
+assert.deepEqual([cellDiff.instancesOnlyInA, cellDiff.instancesOnlyInB], [[removed], []]);
+assert.deepEqual(cellDiff.layers.find((l) => l.layer.layer === 99), { layer: NEW_LAYER, onlyInA: [], onlyInB: [newBox] });
+assert.deepEqual(cellDiff.layers.find((l) => isDeepStrictEqual(l.layer, spec(metal))),
+  { layer: spec(metal), onlyInA: [oldBox], onlyInB: [movedBox] }, "a changed shape is on both sides");
+assert.equal(cellDiff.layers.length, 2);
+// The reverse comparison swaps the sides.
+const reverse = k.diff(edited, ringo, {});
+assert.deepEqual(reverse.cells[0].layers.find((l) => l.layer.layer === 99).onlyInA, [newBox]);
+assert.deepEqual(reverse.cellsOnlyInA, ["ADDED"]);
+console.log(`diff: ${top} differs in ${cellDiff.layers.length} layers and 1 instance; cell ADDED and layer 99/0 are new`);
+
+// The object diff drives markers directly: shapes are in the cell's coordinates.
+const diffView = new k.View(false);
+diffView.resize(400, 300);
+diffView.open(edited);
+diffView.showCell(top);
+assert.equal(diffView.setMarkers(cellDiff.layers.flatMap((l) => l.onlyInB).map((shape) => ({ shape, color: "#00ff00" }))), 2);
+diffView.delete();
+
+// Geometry: what the mask would show, whatever objects draw it.
+// `edited` has other top cells now (ADDED, and the cell whose only placement went), so its cell is named.
+const x = k.xor(ringo, edited, { cellB: top });
+assert.deepEqual(x.find((l) => l.layer.layer === 99).polygons,
+  [{ kind: "polygon", holes: [], hull: [{ x: 0, y: 0 }, { x: 0, y: 500 }, { x: 1000, y: 500 }, { x: 1000, y: 0 }] }]);
+// Widening a box differs by the strip added.
+const withBox = variant([{ op: "insertShape", cell: top, layer: NEW_LAYER, shape: newBox }]);
+const withWiderBox = variant([{ op: "insertShape", cell: top, layer: NEW_LAYER, shape: { ...newBox, right: 1100 } }]);
+const strip = { kind: "polygon", holes: [], hull: [{ x: 1000, y: 0 }, { x: 1000, y: 500 }, { x: 1100, y: 500 }, { x: 1100, y: 0 }] };
+assert.deepEqual(k.xor(withBox, withWiderBox, {}), [{ layer: NEW_LAYER, polygons: [strip] }]);
+assert.deepEqual(k.xor(withBox, withWiderBox, { cellA: top, cellB: top }), k.xor(withBox, withWiderBox, {}));
+// An object change other shapes cover is no geometry change: the widened
+// box of `edited` grows into metal a child cell already draws.
+const onlyBox = variant([
+  { op: "eraseShape", cell: top, layer: metal, shape: oldBox },
+  { op: "insertShape", cell: top, layer: metal, shape: movedBox },
+]);
+assert.equal(k.diff(ringo, onlyBox, {}).identical, false);
+assert.deepEqual(k.xor(ringo, onlyBox, {}), []);
+console.log("xor: a box widened by 100 DBU differs by one 100x500 strip; a covered change differs by nothing");
+
+// A box and the same rectangle drawn as a polygon.
+const asPolygon = variant([
+  { op: "eraseShape", cell: top, layer: metal, shape: oldBox },
+  { op: "insertShape", cell: top, layer: metal, shape: { kind: "polygon", hull: [
+    { x: oldBox.left, y: oldBox.bottom }, { x: oldBox.left, y: oldBox.top },
+    { x: oldBox.right, y: oldBox.top }, { x: oldBox.right, y: oldBox.bottom }] } },
+]);
+// KLayout already stores a rectangular polygon as a box, so these are equal
+// even without boxesAsPolygons.
+assert.equal(k.diff(ringo, asPolygon, {}).identical, true);
+assert.equal(k.diff(ringo, asPolygon, { boxesAsPolygons: true }).identical, true);
+assert.deepEqual(k.xor(ringo, asPolygon, {}), []);
+// Instances added, and an array against the same placements one by one.
+const placedCell = removed.cell;
+const at = (x) => ({ cell: placedCell, transform: { displacement: { x, y: 50000 }, angle: 0, mirror: false, magnification: 1 }, array: null });
+const row = { ...at(0), array: { a: { x: 5000, y: 0 }, b: { x: 0, y: 5000 }, na: 3, nb: 2 } };
+const withArray = variant([{ op: "insertInstance", cell: top, instance: row }]);
+const singles = [0, 1, 2].flatMap((i) => [0, 1].map((j) => ({ ...at(i * 5000), transform: { ...at(0).transform, displacement: { x: i * 5000, y: 50000 + j * 5000 } } })));
+const withSingles = variant(singles.map((instance) => ({ op: "insertInstance", cell: top, instance })));
+const arrayDiff = k.diff(ringo, withArray, {}).cells[0];
+assert.deepEqual([arrayDiff.instancesOnlyInA, arrayDiff.instancesOnlyInB.length, arrayDiff.layers], [[], 1, []]);
+const { array: reported } = arrayDiff.instancesOnlyInB[0];
+assert.deepEqual([arrayDiff.instancesOnlyInB[0].cell, reported.na * reported.nb], [placedCell, 6]);
+const split = k.diff(withArray, withSingles, {}).cells[0];
+assert.deepEqual([split.instancesOnlyInA.length, split.instancesOnlyInB.length], [1, 6]);
+assert.equal(k.diff(withArray, withSingles, { expandArrays: true }).identical, true);
+// A path against the polygon it draws.
+const bend = { kind: "path", points: [{ x: 0, y: 0 }, { x: 1000, y: 0 }, { x: 1000, y: 1000 }], width: 100 };
+const bendOutline = { kind: "polygon", hull: [
+  { x: 0, y: -50 }, { x: 0, y: 50 }, { x: 950, y: 50 }, { x: 950, y: 1000 }, { x: 1050, y: 1000 }, { x: 1050, y: -50 }] };
+const withPath = variant([{ op: "insertShape", cell: top, layer: NEW_LAYER, shape: bend }]);
+const withOutline = variant([{ op: "insertShape", cell: top, layer: NEW_LAYER, shape: bendOutline }]);
+const pathDiff = k.diff(withPath, withOutline, {}).cells[0].layers[0];
+assert.deepEqual([pathDiff.onlyInA.map((s) => s.kind), pathDiff.onlyInB.map((s) => s.kind)], [["path"], ["polygon"]]);
+assert.equal(k.diff(withPath, withOutline, { pathsAsPolygons: true }).identical, true);
+assert.deepEqual(k.xor(withPath, withOutline, {}), []);
+console.log("diff: an array equals its placements with expandArrays; a path equals its outline with pathsAsPolygons");
+// Tolerance, in DBU.
+const nudged = variant([
+  { op: "eraseShape", cell: top, layer: metal, shape: oldBox },
+  { op: "insertShape", cell: top, layer: metal, shape: { ...oldBox, right: oldBox.right + 1 } },
+]);
+assert.equal(k.diff(ringo, nudged, {}).identical, false);
+assert.equal(k.diff(ringo, nudged, { tolerance: 1 }).identical, true);
+
+assert.throws(() => k.diff(ringo, new TextEncoder().encode("garbage"), {}), /Stream has unknown format/);
+assert.throws(() => k.diff(ringo, ringo, { tolerance: -1 }), /tolerance: expected 0 or more/);
+assert.throws(() => k.diff(ringo, ringo, { properties: "yes" }), /properties: expected true or false/);
+assert.throws(() => k.xor(ringo, ringo, { cellA: "NOPE" }), /cellA: no cell named NOPE/);
+assert.throws(() => k.xor(ringo, edited, {}), /cellB: the layout has \d top cells; name one/);
+console.log("diff and xor: tolerance and options; bad input rejected with the field named");
 console.log("ok");
 
 function isDeepStrictEqual(a, b) {
